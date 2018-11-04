@@ -532,10 +532,62 @@ class TestSriovAgent(base.BaseTestCase):
         cleaned_port_id = self.agent._clean_network_ports(mac_slot_2)
         self.assertEqual({}, self.agent.network_ports)
 
+    def test_configurations_has_rp_bandwidth(self):
+        rp_bandwidth = {'ens7': {'egress': 10000, 'ingress': 10000}}
+        agent = sriov_nic_agent.SriovNicSwitchAgent(
+            {}, {}, 0, rp_bandwidth, {})
+        self.assertIn(c_const.RP_BANDWIDTHS,
+                      agent.agent_state['configurations'])
+
+        rp_bandwidths = agent.agent_state['configurations'][
+            c_const.RP_BANDWIDTHS]
+        self.assertEqual(rp_bandwidth['ens7'], rp_bandwidths['ens7'])
+
+    def test_configurations_has_rp_default_inventory(self):
+        rp_inventory_values = {
+            'allocation_ratio': 1.0,
+            'min_unit': 1,
+            'step_size': 1,
+            'reserved': 0
+        }
+        agent = sriov_nic_agent.SriovNicSwitchAgent(
+            {}, {}, 0, {}, rp_inventory_values)
+        self.assertIn(c_const.RP_INVENTORY_DEFAULTS,
+                      agent.agent_state['configurations'])
+
+        rp_inv_defaults = agent.agent_state['configurations'][
+            c_const.RP_INVENTORY_DEFAULTS]
+        self.assertListEqual(
+            sorted(list(rp_inventory_values)),
+            sorted(list(rp_inv_defaults.keys())))
+        for inv_key, inv_value in rp_inventory_values.items():
+            self.assertEqual(inv_value,
+                             rp_inv_defaults[inv_key])
+
+    def test_process_activated_bindings(self):
+        # Create several devices which are pairs of (<mac_addr>, <pci_slot>)
+        dev_a = ('fa:16:3e:f8:ae:af', "0000:01:00.0")
+        dev_b = ('fa:16:3e:f8:ae:b0', "0000:02:00.0")
+        dev_c = ('fa:16:3e:f8:ae:b1', "0000:03:00.0")
+        # Create device_info
+        fake_device_info = {
+            'current': set([dev_a, dev_b]),
+            'added': set([dev_c]),
+            'removed': set(),
+            'updated': set()}
+        fake_activated_bindings = set([dev_a])
+        self.agent.process_activated_bindings(fake_device_info,
+                                              fake_activated_bindings)
+        self.assertLessEqual(fake_activated_bindings,
+                             fake_device_info['added'])
+
 
 class FakeAgent(object):
     def __init__(self):
         self.updated_devices = set()
+        self.activated_bindings = set()
+        self.conf = mock.Mock()
+        self.conf.host = 'host1'
 
 
 class TestSriovNicSwitchRpcCallbacks(base.BaseTestCase):
@@ -552,6 +604,10 @@ class TestSriovNicSwitchRpcCallbacks(base.BaseTestCase):
         return {'id': uuidutils.generate_uuid(),
                 portbindings.PROFILE: {'pci_slot': PCI_SLOT},
                 'mac_address': DEVICE_MAC}
+
+    def _create_fake_bindings(self, fake_port, fake_host):
+        return {'port_id': fake_port['id'],
+                'host': fake_host}
 
     def test_port_update_with_pci_slot(self):
         port = self._create_fake_port()
@@ -590,6 +646,40 @@ class TestSriovNicSwitchRpcCallbacks(base.BaseTestCase):
         kwargs = {'context': self.context, 'network': network1}
         self.sriov_rpc_callback.network_update(**kwargs)
         self.assertEqual(set([('mac1', 'slot1')]), self.agent.updated_devices)
+
+    def test_binding_activate(self):
+        fake_port = self._create_fake_port()
+        self.agent.get_device_details_from_port_id = mock.Mock()
+        self.agent.get_device_details_from_port_id.return_value = {
+            'mac_address': fake_port['mac_address'],
+            'profile': fake_port[portbindings.PROFILE]
+        }
+        kwargs = self._create_fake_bindings(fake_port, self.agent.conf.host)
+        kwargs['context'] = self.context
+        self.sriov_rpc_callback.binding_activate(**kwargs)
+        # Assert agent.activated_binding set contains the new binding
+        self.assertIn((fake_port['mac_address'],
+                       fake_port[portbindings.PROFILE]['pci_slot']),
+                      self.agent.activated_bindings)
+
+    def test_binding_activate_no_host(self):
+        fake_port = self._create_fake_port()
+        kwargs = self._create_fake_bindings(fake_port, 'other-host')
+        kwargs['context'] = self.context
+        self.sriov_rpc_callback.binding_activate(**kwargs)
+        # Assert no bindings were added
+        self.assertEqual(set(), self.agent.activated_bindings)
+
+    def test_binding_deactivate(self):
+        # binding_deactivate() basically does nothing
+        # call it with both the agent's host and other host to cover
+        # all code paths
+        fake_port = self._create_fake_port()
+        kwargs = self._create_fake_bindings(fake_port, self.agent.conf.host)
+        kwargs['context'] = self.context
+        self.sriov_rpc_callback.binding_deactivate(**kwargs)
+        kwargs['host'] = 'other-host'
+        self.sriov_rpc_callback.binding_deactivate(**kwargs)
 
 
 class TestSRIOVAgentExtensionConfig(base.BaseTestCase):
