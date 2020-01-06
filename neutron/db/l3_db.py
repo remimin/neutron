@@ -405,6 +405,17 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 )
                 context.session.add(router)
                 router_port.create()
+		gw_to_fip = l3_obj.FloatingIP(
+                    context,
+                    project_id=router['project_id'],
+                    id=uuidutils.generate_uuid(),
+                    floating_ip_address=gw_port['fixed_ips'][0]['ip_address'],
+                    floating_network_id=network_id,
+                    floating_port_id=gw_port['id'],
+                    status=constants.FLOATINGIP_STATUS_ACTIVE,
+                    #standard_attr_id='111'
+                )
+                gw_to_fip.create()
 
     def _validate_gw_info(self, context, gw_port, info, ext_ips):
         network_id = info['network_id'] if info else None
