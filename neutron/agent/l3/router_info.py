@@ -218,14 +218,22 @@ class RouterInfo(object):
         """
         # Clear out all iptables rules for floating ips
         self.iptables_manager.ipv4['nat'].clear_rules_by_tag('floating_ip')
+        self.iptables_manager.ipv6['nat'].clear_rules_by_tag('floating_ip')
 
         floating_ips = self.get_floating_ips()
         # Loop once to ensure that floating ips are configured.
         for fip in floating_ips:
             # Rebuild iptables rules for the floating ip.
+            fip_ip = fip['floating_ip_address']
+            addr = netaddr.IPAddress(fip_ip)
             for chain, rule in self.floating_forward_rules(fip):
-                self.iptables_manager.ipv4['nat'].add_rule(chain, rule,
+                if addr.version == lib_constants.IP_VERSION_4:
+                    self.iptables_manager.ipv4['nat'].add_rule(chain, rule,
                                                            tag='floating_ip')
+                else:
+                    self.iptables_manager.ipv6['nat'].add_rule(chain, rule,
+                                                           tag='floating_ip')
+
 
         self.iptables_manager.apply()
 
@@ -249,6 +257,7 @@ class RouterInfo(object):
 
         # Clear out all iptables rules for floating ips
         self.iptables_manager.ipv4['mangle'].clear_rules_by_tag('floating_ip')
+        self.iptables_manager.ipv6['mangle'].clear_rules_by_tag('floating_ip')
         all_floating_ips = self.get_floating_ips()
         ext_scope = self._get_external_address_scope()
         # Filter out the floating ips that have fixed ip in the same address
@@ -270,11 +279,17 @@ class RouterInfo(object):
                     '-o %s -j MARK --set-xmark %s'
                     % (device, ext_scope_mark),
                     tag='floating_ip')
+                self.iptables_manager.ipv6['mangle'].add_rule(
+                    'float-snat',
+                    '-o %s -j MARK --set-xmark %s'
+                    % (device, ext_scope_mark),
+                    tag='floating_ip')
 
         # Loop once to ensure that floating ips are configured.
         for fip in floating_ips:
             # Rebuild iptables rules for the floating ip.
             fip_ip = fip['floating_ip_address']
+            addr = netaddr.IPAddress(fip_ip)
             # Send the floating ip traffic to the right address scope
             fixed_ip = fip['fixed_ip_address']
             fixed_scope = fip.get('fixed_ip_address_scope')
@@ -282,8 +297,12 @@ class RouterInfo(object):
             mangle_rules = self.floating_mangle_rules(
                 fip_ip, fixed_ip, internal_mark)
             for chain, rule in mangle_rules:
-                self.iptables_manager.ipv4['mangle'].add_rule(
-                    chain, rule, tag='floating_ip')
+                if addr.version == lib_constants.IP_VERSION_4:
+                    self.iptables_manager.ipv4['mangle'].add_rule(
+                        chain, rule, tag='floating_ip')
+                else:
+                    self.iptables_manager.ipv6['mangle'].add_rule(
+                        chain, rule, tag='floating_ip')
 
     def process_snat_dnat_for_fip(self):
         try:
@@ -886,6 +905,10 @@ class RouterInfo(object):
         iptables_manager.ipv4['nat'].empty_chain('snat')
         iptables_manager.ipv4['mangle'].empty_chain('mark')
         iptables_manager.ipv4['mangle'].empty_chain('POSTROUTING')
+        iptables_manager.ipv6['nat'].empty_chain('POSTROUTING')
+        iptables_manager.ipv6['nat'].empty_chain('snat')
+        iptables_manager.ipv6['mangle'].empty_chain('mark')
+        iptables_manager.ipv6['mangle'].empty_chain('POSTROUTING')
 
     def _add_snat_rules(self, ex_gw_port, iptables_manager,
                         interface_name):
@@ -910,13 +933,31 @@ class RouterInfo(object):
                     rules = self.external_gateway_mangle_rules(interface_name)
                     for rule in rules:
                         iptables_manager.ipv4['mangle'].add_rule(*rule)
+                    break
 
+            for ip_addr in ex_gw_port['fixed_ips']:
+                ex_gw_ip = ip_addr['ip_address']
+                if netaddr.IPAddress(ex_gw_ip).version == 6:
+                    if self._snat_enabled:
+                        rules = self.external_gateway_nat_snat_rules(
+                            ex_gw_ip, interface_name)
+                        for rule in rules:
+                            iptables_manager.ipv6['nat'].add_rule(*rule)
+
+                    rules = self.external_gateway_nat_fip_rules(
+                        ex_gw_ip, interface_name)
+                    for rule in rules:
+                        iptables_manager.ipv6['nat'].add_rule(*rule)
+                    rules = self.external_gateway_mangle_rules(interface_name)
+                    for rule in rules:
+                        iptables_manager.ipv6['mangle'].add_rule(*rule)
                     break
 
     def _handle_router_snat_rules(self, ex_gw_port, interface_name):
         self._empty_snat_chains(self.iptables_manager)
 
         self.iptables_manager.ipv4['nat'].add_rule('snat', '-j $float-snat')
+        self.iptables_manager.ipv6['nat'].add_rule('snat', '-j $float-snat')
 
         self._add_snat_rules(ex_gw_port,
                              self.iptables_manager,

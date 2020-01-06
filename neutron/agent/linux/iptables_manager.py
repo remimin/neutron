@@ -365,33 +365,38 @@ class IptablesManager(object):
         # identify ingress packets from a certain interface.
         self.ipv4['mangle'].add_chain('mark')
         self.ipv4['mangle'].add_rule('PREROUTING', '-j $mark')
+        self.ipv6['mangle'].add_chain('mark')
+        self.ipv6['mangle'].add_rule('PREROUTING', '-j $mark')
 
     def initialize_nat_table(self):
-        self.ipv4.update(
-            {'nat': IptablesTable(binary_name=self.wrap_name)})
+        for tables in [self.ipv4, self.ipv6]:
+            tables.update(
+                {'nat': IptablesTable(binary_name=self.wrap_name)})
+
+            # Add a neutron-postrouting-bottom chain. It's intended to be
+            # shared among the various neutron components. We set it as the
+            # last chain of POSTROUTING chain.
+            tables['nat'].add_chain('neutron-postrouting-bottom', wrap=False)
+            tables['nat'].add_rule(
+                'POSTROUTING', '-j neutron-postrouting-bottom', wrap=False)
+
+            # We add a snat chain to the shared neutron-postrouting-bottom
+            # chain so that it's applied last.
+            tables['nat'].add_chain('snat')
+            tables['nat'].add_rule('neutron-postrouting-bottom',
+                                      '-j $snat', wrap=False,
+                                      comment=ic.SNAT_OUT)
+
+            # And then we add a float-snat chain and jump to first thing in
+            # the snat chain.
+            tables['nat'].add_chain('float-snat')
+            tables['nat'].add_rule('snat', '-j $float-snat')
 
         builtin_chains = {
-            4: {'nat': ['PREROUTING', 'OUTPUT', 'POSTROUTING']}}
+            4: {'nat': ['PREROUTING', 'OUTPUT', 'POSTROUTING']},
+            6: {'nat': ['PREROUTING', 'OUTPUT', 'POSTROUTING']}}
         self._configure_builtin_chains(builtin_chains)
 
-        # Add a neutron-postrouting-bottom chain. It's intended to be
-        # shared among the various neutron components. We set it as the
-        # last chain of POSTROUTING chain.
-        self.ipv4['nat'].add_chain('neutron-postrouting-bottom', wrap=False)
-        self.ipv4['nat'].add_rule(
-            'POSTROUTING', '-j neutron-postrouting-bottom', wrap=False)
-
-        # We add a snat chain to the shared neutron-postrouting-bottom
-        # chain so that it's applied last.
-        self.ipv4['nat'].add_chain('snat')
-        self.ipv4['nat'].add_rule('neutron-postrouting-bottom',
-                                  '-j $snat', wrap=False,
-                                  comment=ic.SNAT_OUT)
-
-        # And then we add a float-snat chain and jump to first thing in
-        # the snat chain.
-        self.ipv4['nat'].add_chain('float-snat')
-        self.ipv4['nat'].add_rule('snat', '-j $float-snat')
 
     def _configure_builtin_chains(self, builtin_chains):
         for ip_version in builtin_chains:
