@@ -413,6 +413,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                     floating_network_id=network_id,
                     floating_port_id=gw_port['id'],
                     status=constants.FLOATINGIP_STATUS_ACTIVE,
+                    #standard_attr_id='111'
                 )
                 gw_to_fip.create()
 
@@ -1186,6 +1187,49 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         return [ip for ip in port['fixed_ips']
                 if netaddr.IPAddress(ip['ip_address']).version == 4]
 
+    def _port_ipv6_fixed_ips(self, port):
+        return [ip for ip in port['fixed_ips']
+                if netaddr.IPAddress(ip['ip_address']).version == 6]
+
+    def _internal_fip_v6_assoc_data(self, context, fip, tenant_id):
+        """Retrieve internal port data for floating IP.
+
+        Retrieve information concerning the internal port where
+        the floating IP should be associated to.
+        """
+        internal_port = self._core_plugin.get_port(context, fip['port_id'])
+        if internal_port['tenant_id'] != tenant_id and not context.is_admin:
+            port_id = fip['port_id']
+            msg = (_('Cannot process floating IP association with '
+                     'Port %s, since that port is owned by a '
+                     'different tenant') % port_id)
+            raise n_exc.BadRequest(resource='floatingip', msg=msg)
+
+        internal_subnet_id = None
+        if not utils.is_fip_serviced(internal_port.get('device_owner')):
+            msg = _('Port %(id)s is unable to be assigned a floating IP')
+            raise n_exc.BadRequest(resource='floatingip', msg=msg)
+        if fip.get('fixed_ip_address'):
+            internal_ip_address = fip['fixed_ip_address']
+            for ip in internal_port['fixed_ips']:
+                if ip['ip_address'] == internal_ip_address:
+                    internal_subnet_id = ip['subnet_id']
+            if not internal_subnet_id:
+                msg = (_('Port %(id)s does not have fixed ip %(address)s') %
+                       {'id': internal_port['id'],
+                        'address': internal_ip_address})
+                raise n_exc.BadRequest(resource='floatingip', msg=msg)
+        else:
+            ipv6_fixed_ips = self._port_ipv6_fixed_ips(internal_port)
+            if len(ipv6_fixed_ips) > 1:
+                msg = (_('Port %s has multiple fixed IPv6 addresses.  Must '
+                         'provide a specific IPv6 address when assigning a '
+                         'floating IP') % internal_port['id'])
+                raise n_exc.BadRequest(resource='floatingip', msg=msg)
+            internal_ip_address = ipv6_fixed_ips[0]['ip_address']
+            internal_subnet_id = ipv6_fixed_ips[0]['subnet_id']
+        return internal_port, internal_subnet_id, internal_ip_address
+
     def _internal_fip_assoc_data(self, context, fip, tenant_id):
         """Retrieve internal port data for floating IP.
 
@@ -1206,11 +1250,6 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
             raise n_exc.BadRequest(resource='floatingip', msg=msg)
         if fip.get('fixed_ip_address'):
             internal_ip_address = fip['fixed_ip_address']
-            if netaddr.IPAddress(internal_ip_address).version != 4:
-                msg = (_('Cannot process floating IP association with %s, '
-                         'since that is not an IPv4 address') %
-                       internal_ip_address)
-                raise n_exc.BadRequest(resource='floatingip', msg=msg)
             for ip in internal_port['fixed_ips']:
                 if ip['ip_address'] == internal_ip_address:
                     internal_subnet_id = ip['subnet_id']
@@ -1221,10 +1260,6 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 raise n_exc.BadRequest(resource='floatingip', msg=msg)
         else:
             ipv4_fixed_ips = self._port_ipv4_fixed_ips(internal_port)
-            if not ipv4_fixed_ips:
-                msg = (_('Cannot add floating IP to port %s that has '
-                         'no fixed IPv4 addresses') % internal_port['id'])
-                raise n_exc.BadRequest(resource='floatingip', msg=msg)
             if len(ipv4_fixed_ips) > 1:
                 msg = (_('Port %s has multiple fixed IPv4 addresses.  Must '
                          'provide a specific IPv4 address when assigning a '
@@ -1243,9 +1278,16 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         The confirmation of the internal port whether owned by the tenant who
         owns the floating IP will be confirmed by _get_router_for_floatingip.
         """
-        (internal_port, internal_subnet_id,
-         internal_ip_address) = self._internal_fip_assoc_data(
-            context, fip, floatingip_obj.project_id)
+        floating_ip_address = str(floatingip_obj.floating_ip_address)
+        if netaddr.IPNetwork(floating_ip_address).version == 4:
+            (internal_port, internal_subnet_id,
+             internal_ip_address) = self._internal_fip_assoc_data(
+                context, fip, floatingip_obj.project_id)
+        else:
+            (internal_port, internal_subnet_id,
+             internal_ip_address) = self._internal_fip_v6_assoc_data(
+                context, fip, floatingip_obj.project_id)
+
         router_id = self._get_router_for_floatingip(
             context, internal_port,
             internal_subnet_id, floatingip_obj.floating_network_id)
@@ -1331,6 +1373,10 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         net = self._core_plugin._get_network(context, net_id)
         return any(s.ip_version == 4 for s in net.subnets)
 
+    def _has_subnet(self, context, net_id):
+        net = self._core_plugin._get_network(context, net_id)
+        return any((s.ip_version == 4 or s.ip_version == 6) for s in net.subnets)
+
     def _create_floatingip(self, context, floatingip,
             initial_status=constants.FLOATINGIP_STATUS_ACTIVE):
         try:
@@ -1349,8 +1395,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
             msg = _("Network %s is not a valid external network") % f_net_id
             raise n_exc.BadRequest(resource='floatingip', msg=msg)
 
-        if not self._is_ipv4_network(context, f_net_id):
-            msg = _("Network %s does not contain any IPv4 subnet") % f_net_id
+        if not self._has_subnet(context, f_net_id):
+            msg = _("Network %s does not contain any subnet") % f_net_id
             raise n_exc.BadRequest(resource='floatingip', msg=msg)
 
         # This external port is never exposed to the tenant.
@@ -1386,12 +1432,16 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 self._core_plugin, context.elevated(),
                 external_port['id']),\
                 context.session.begin(subtransactions=True):
-            # Ensure IPv4 addresses are allocated on external port
+            # Ensure IP addresses are allocated on external port
             external_ipv4_ips = self._port_ipv4_fixed_ips(external_port)
             if not external_ipv4_ips:
-                raise n_exc.ExternalIpAddressExhausted(net_id=f_net_id)
+                external_ipv6_ips = self._port_ipv6_fixed_ips(external_port)
+                if not external_ipv6_ips:
+                    raise n_exc.ExternalIpAddressExhausted(net_id=f_net_id)
+                floating_fixed_ip = external_ipv6_ips[0]
+            else:
+                floating_fixed_ip = external_ipv4_ips[0]
 
-            floating_fixed_ip = external_ipv4_ips[0]
             floating_ip_address = floating_fixed_ip['ip_address']
             floatingip_obj = l3_obj.FloatingIP(
                 context,
