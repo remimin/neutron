@@ -36,7 +36,16 @@ SHARED_OPTS = [
                default='',
                help=_("Group (gid or name) running metadata proxy after "
                       "its initialization (if empty: agent effective "
-                      "group)."))
+                      "group).")),
+    cfg.BoolOpt('enable_metrics_proxy',
+                default=False,
+                help=_('Allow to enable or disable metrics proxy function. '
+                       'Default value is False.')),
+    cfg.StrOpt('metrics_proxy_socket',
+               default='$state_path/telegraf.sock',
+               help=_('Location of Metrics Proxy UNIX domain socket '
+                      'for forwarding metrics of tenant instances to metrics '
+                      'collector server listening on metrics_proxy_socket.'))
 ]
 
 

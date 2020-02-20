@@ -19,6 +19,7 @@ from neutron.agent.linux import ip_lib
 from neutron.common import exceptions as n_exc
 from neutron.conf.agent import common as config
 from neutron.conf.agent.l3 import config as l3_config
+from neutron.conf.agent.metadata import config as meta_conf
 from neutron.tests import base
 
 
@@ -31,6 +32,7 @@ class TestRouterInfo(base.BaseTestCase):
 
         conf = config.setup_conf()
         l3_config.register_l3_agent_config_opts(l3_config.OPTS, conf)
+        meta_conf.register_meta_conf_opts(meta_conf.SHARED_OPTS, conf)
 
         self.ip_cls_p = mock.patch('neutron.agent.linux.ip_lib.IPWrapper')
         ip_cls = self.ip_cls_p.start()

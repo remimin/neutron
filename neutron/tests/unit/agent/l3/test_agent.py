@@ -58,6 +58,7 @@ from neutron.common import exceptions as n_exc
 from neutron.conf.agent import common as agent_config
 from neutron.conf.agent.l3 import config as l3_config
 from neutron.conf.agent.l3 import ha as ha_conf
+from neutron.conf.agent.metadata import config as meta_conf
 from neutron.conf import common as base_config
 from neutron.tests import base
 from neutron.tests.common import l3_test_common
@@ -87,6 +88,7 @@ class BasicRouterOperationsFramework(base.BaseTestCase):
         agent_config.register_external_process_opts(self.conf)
         agent_config.register_pd_opts(self.conf)
         agent_config.register_ra_opts(self.conf)
+        meta_conf.register_meta_conf_opts(meta_conf.SHARED_OPTS, self.conf)
         self.conf.set_override('interface_driver',
                                'neutron.agent.linux.interface.NullDriver')
         self.conf.set_override('state_path', cfg.CONF.state_path)
