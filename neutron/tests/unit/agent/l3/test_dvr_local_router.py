@@ -32,6 +32,7 @@ from neutron.common import utils as common_utils
 from neutron.conf.agent import common as agent_config
 from neutron.conf.agent.l3 import config as l3_config
 from neutron.conf.agent.l3 import ha as ha_conf
+from neutron.conf.agent.metadata import config as meta_conf
 from neutron.conf import common as base_config
 from neutron.tests import base
 from neutron.tests.common import l3_test_common
@@ -52,6 +53,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         self.conf.register_opts(agent_config.AGENT_STATE_OPTS, 'AGENT')
         l3_config.register_l3_agent_config_opts(l3_config.OPTS, self.conf)
         ha_conf.register_l3_agent_ha_opts(self.conf)
+        meta_conf.register_meta_conf_opts(meta_conf.SHARED_OPTS, self.conf)
         agent_config.register_interface_driver_opts_helper(self.conf)
         agent_config.register_process_monitor_opts(self.conf)
         agent_config.register_interface_opts(self.conf)

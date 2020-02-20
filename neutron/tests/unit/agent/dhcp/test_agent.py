@@ -471,11 +471,15 @@ class TestDhcpAgent(base.BaseTestCase):
                        ready.call_args_list[1][0][0])
         self.assertEqual(set(range(port_count)), ports_ready)
 
-    def test_dhcp_ready_ports_updates_after_enable_dhcp(self):
+    @mock.patch.object(metadata_driver.MetadataDriver,
+                       '_reload_metrics_proxy')
+    def test_dhcp_ready_ports_updates_after_enable_dhcp(self,
+                                                        reload_metrics):
         dhcp = dhcp_agent.DhcpAgent(HOSTNAME)
         self.assertEqual(set(), dhcp.dhcp_ready_ports)
         dhcp.configure_dhcp_for_network(fake_network)
         self.assertEqual({fake_port1.id}, dhcp.dhcp_ready_ports)
+        self.assertTrue(reload_metrics.called)
 
     def test_dhcp_metadata_destroy(self):
         cfg.CONF.set_override('force_metadata', True)

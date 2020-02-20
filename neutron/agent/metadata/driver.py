@@ -17,6 +17,7 @@ import errno
 import grp
 import os
 import pwd
+import socket
 
 from neutron_lib.callbacks import events
 from neutron_lib.callbacks import registry
@@ -44,6 +45,8 @@ global
     group       %(group)s
     maxconn     1024
     pidfile     %(pidfile)s
+    stats       socket %(stat_socket)s mode 777 level admin
+    stats       timeout 30s
     daemon
 
 defaults
@@ -64,6 +67,17 @@ listen listener
     bind %(host)s:%(port)s
     server metadata %(unix_socket_path)s
     http-request add-header X-Neutron-%(res_type)s-ID %(res_id)s
+"""
+
+METRICS_PXNAME = 'metrics'
+METRICS_SVRNAME = 'metrics'
+_METRICS_PROXY_HAPROXY_CONFIG_TEMPLATE = """
+listen %(pxname)s
+    mode tcp
+    option tcplog
+    option tcpka
+    bind %(host)s:%(port)s
+    server %(svrname)s %(unix_socket_path)s
 """
 
 
@@ -132,10 +146,11 @@ class HaproxyConfigurator(object):
         else:
             cfg_info['res_type'] = 'Router'
             cfg_info['res_id'] = self.router_id
-
+        cfg_dir = self.get_config_path(self.state_path)
+        stat_socket = os.path.join(cfg_dir, "%s.sock" % cfg_info['res_id'])
+        cfg_info['stat_socket'] = stat_socket
         haproxy_cfg = _HAPROXY_CONFIG_TEMPLATE % cfg_info
         LOG.debug("haproxy_cfg = %s", haproxy_cfg)
-        cfg_dir = self.get_config_path(self.state_path)
         # uuid has to be included somewhere in the command line so that it can
         # be tracked by process_monitor.
         self.cfg_path = os.path.join(cfg_dir, "%s.conf" % cfg_info['res_id'])
@@ -156,13 +171,87 @@ class HaproxyConfigurator(object):
         cfg_path = os.path.join(
             HaproxyConfigurator.get_config_path(state_path),
             "%s.conf" % uuid)
+        stat_path = os.path.join(
+            HaproxyConfigurator.get_config_path(state_path),
+            "%s.sock" % uuid)
         try:
             os.unlink(cfg_path)
+            os.unlink(stat_path)
         except OSError as ex:
             # It can happen that this function is called but metadata proxy
             # was never spawned so its config file won't exist
             if ex.errno != errno.ENOENT:
                 raise
+
+    @staticmethod
+    def stat_socket_path(uuid, state_path):
+        return os.path.join(
+            HaproxyConfigurator.get_config_path(state_path),
+            "%s.sock" % uuid)
+
+    @staticmethod
+    def add_metrics_proxy_config(cfg_path, host, port, unix_socket_path):
+        """Add metrics proxy configration in haproxy config file.
+        """
+        with open(cfg_path, "a+") as cfg_file:
+            cfg_info = {
+                'svrname': METRICS_SVRNAME,
+                'pxname': METRICS_PXNAME,
+                'host': host,
+                'port': port,
+                'unix_socket_path': unix_socket_path}
+            metrics_proxy_conf = \
+                _METRICS_PROXY_HAPROXY_CONFIG_TEMPLATE % cfg_info
+            cfg_file.write(metrics_proxy_conf)
+
+
+class HaproxyStatHandler(object):
+
+    _PROMPT = '> '
+    _BUFSIZE = 4096
+    _CLI_TIMEOUT = 30
+
+    def __init__(self, stat_socket, timeout=30):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(timeout)
+        self.stat_socket = stat_socket
+
+    def __enter__(self):
+        self.sock.connect(self.stat_socket)
+        self._send('prompt')
+        self._recv()
+        self._send('set timeout cli %d' % self._CLI_TIMEOUT)
+        self._recv()
+        return self
+
+    def _recv(self):
+        rbuf = ''
+        while not rbuf.endswith(self._PROMPT):
+            data = self.sock.recv(self._BUFSIZE)
+            rbuf += data
+        return rbuf.strip(self._PROMPT)
+
+    def _send(self, cmdline):
+        self.sock.sendall('%s\n' % cmdline)
+
+    def __exit__(self, *args):
+        self.sock.close()
+
+    def execute(self, cmdline):
+        self._send(cmdline)
+        return self._recv()
+
+    def shutdown_frontend_sessions(self, frontend):
+        res = self.execute('show sess')
+        sessions = []
+        while '\n' in res:
+            line, res = res.split('\n', 1)
+            match = 'fe={0}'.format(frontend)
+            if match in line:
+                sid, _ = line.split(':', 1)
+                sessions.append(sid)
+        for sid in sessions:
+            self.execute('shutdown session %s' % sid)
 
 
 class MetadataDriver(object):
@@ -196,6 +285,20 @@ class MetadataDriver(object):
                   'port': port})]
 
     @classmethod
+    def metrics_proxy_filter_rules(cls, port, mark):
+        return [('INPUT', '-p tcp -m tcp --dport %s '
+                 '-j DROP' % port)]
+
+    @classmethod
+    def metrics_proxy_nat_rules(cls, port):
+        return [('PREROUTING', '-d 169.254.169.254/32 '
+                 '-i %(interface_name)s '
+                 '-p tcp -m tcp --dport 81 -j REDIRECT '
+                 '--to-ports %(port)s' %
+                 {'interface_name': namespaces.INTERNAL_DEV_PREFIX + '+',
+                  'port': port})]
+
+    @classmethod
     def _get_metadata_proxy_user_group(cls, conf):
         user = conf.metadata_proxy_user or str(os.geteuid())
         group = conf.metadata_proxy_group or str(os.getegid())
@@ -219,11 +322,72 @@ class MetadataDriver(object):
                                           conf.state_path,
                                           pid_file)
             haproxy.create_config_file()
+            if conf.enable_metrics_proxy and conf.metrics_proxy_socket:
+                # Metrics proxy frontend port use listener port + 1
+                HaproxyConfigurator.add_metrics_proxy_config(
+                    haproxy.cfg_path, bind_address, port + 1,
+                    conf.metrics_proxy_socket)
             proxy_cmd = ['haproxy',
                          '-f', haproxy.cfg_path]
             return proxy_cmd
 
         return callback
+
+    @classmethod
+    def _reload_metrics_proxy(cls, conf, pm, network_id=None,
+                              router_id=None):
+        uuid = network_id or router_id
+        stat_socket = HaproxyConfigurator.stat_socket_path(
+            uuid, conf.state_path)
+        if not os.path.exists(stat_socket):
+            if pm.active:
+                LOG.warning("Haproxy state socket %s doesn't exists",
+                            stat_socket)
+                pm.disable()
+            return
+        try:
+            with HaproxyStatHandler(stat_socket) as hastat:
+                result = hastat.execute('show stat')
+                while '\n' in result:
+                    line, result = result.split('\n', 1)
+                    if 'FRONTEND' in line:
+                        _res = line.split(',')
+                        pxname = _res[0]
+                        status = _res[17]
+                        if METRICS_PXNAME != pxname:
+                            continue
+                        if not conf.enable_metrics_proxy:
+                            if status == 'OPEN':
+                                # Disable metrics proxy forward.
+                                LOG.debug('Running haproxy %s disable '
+                                          'frontend %s',
+                                          uuid, METRICS_PXNAME)
+                                hastat.execute(
+                                    'disable frontend %s' % METRICS_PXNAME)
+                                hastat.shutdown_frontend_sessions(
+                                    METRICS_PXNAME)
+                                return
+                            elif status == 'STOP':
+                                # Metrics proxy have been stopped.
+                                return
+                        if conf.enable_metrics_proxy:
+                            if status == 'STOP':
+                                # Enable metrics proxy forward.
+                                LOG.debug('Running haproxy %s enable '
+                                          'frontend %s',
+                                          uuid, METRICS_PXNAME)
+                                hastat.execute(
+                                    'enable frontend %s' % METRICS_PXNAME)
+                                return
+                            elif status == 'OPEN':
+                                # Metrics Proxy works well.
+                                return
+                if conf.enable_metrics_proxy:
+                    # Metrics proxy doesn't exist in running haproxy process.
+                    # Stop running stale haproxy process.
+                    pm.disable()
+        except Exception as exc:
+            LOG.error("Reload metrics proxy failed. Reason %s", exc)
 
     @classmethod
     def spawn_monitored_metadata_proxy(cls, monitor, ns_name, port, conf,
@@ -241,7 +405,8 @@ class MetadataDriver(object):
         # haproxy. This will help with upgrading and shall be removed in next
         # cycle.
         cls._migrate_python_ns_metadata_proxy_if_needed(pm)
-
+        cls._reload_metrics_proxy(conf, pm, network_id=network_id,
+                                  router_id=router_id)
         pm.enable()
         monitor.register(uuid, METADATA_SERVICE_NAME, pm)
         cls.monitors[router_id] = pm
@@ -291,6 +456,13 @@ def after_router_added(resource, event, l3_agent, **kwargs):
         router.iptables_manager.ipv4['filter'].add_rule(c, r)
     for c, r in proxy.metadata_nat_rules(proxy.metadata_port):
         router.iptables_manager.ipv4['nat'].add_rule(c, r)
+    if l3_agent.conf.enable_metrics_proxy and \
+            l3_agent.conf.metrics_proxy_socket:
+        for c, r in proxy.metrics_proxy_filter_rules(
+                proxy.metadata_port + 1, proxy.metadata_access_mark):
+            router.iptables_manager.ipv4['filter'].add_rule(c, r)
+        for c, r in proxy.metrics_proxy_nat_rules(proxy.metadata_port + 1):
+            router.iptables_manager.ipv4['nat'].add_rule(c, r)
     router.iptables_manager.apply()
 
     if not isinstance(router, ha_router.HaRouter):

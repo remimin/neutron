@@ -1085,6 +1085,19 @@ class RouterInfo(object):
              'mask': n_const.ROUTER_MARK_MASK})
         self.iptables_manager.ipv4['mangle'].add_rule(
             'PREROUTING', mark_metadata_for_internal_interfaces)
+        if self.agent_conf.enable_metrics_proxy and \
+                self.agent_conf.metrics_proxy_socket:
+            mark_metrics_proxy_for_internal_interfaces = (
+                '-d 169.254.169.254/32 '
+                '-i %(interface_name)s '
+                '-p tcp -m tcp --dport 81 '
+                '-j MARK --set-xmark %(value)s/%(mask)s' %
+                {'interface_name': INTERNAL_DEV_PREFIX + '+',
+                 'value': self.agent_conf.metadata_access_mark,
+                 'mask': n_const.ROUTER_MARK_MASK})
+            self.iptables_manager.ipv4['mangle'].add_rule(
+                'PREROUTING',
+                mark_metrics_proxy_for_internal_interfaces)
 
     def _get_port_devicename_scopemark(self, ports, name_generator):
         devicename_scopemark = {lib_constants.IP_VERSION_4: dict(),

@@ -23,6 +23,7 @@ from neutron.agent.l3 import router_info
 from neutron.agent.linux import ip_lib
 from neutron.conf.agent import common as config
 from neutron.conf.agent.l3 import config as l3_config
+from neutron.conf.agent.metadata import config as meta_conf
 from neutron.tests import base
 
 
@@ -33,6 +34,7 @@ class TestL3AgentExtensionApi(base.BaseTestCase):
         self.project_id = uuidutils.generate_uuid()
         self.conf = config.setup_conf()
         l3_config.register_l3_agent_config_opts(l3_config.OPTS, self.conf)
+        meta_conf.register_meta_conf_opts(meta_conf.SHARED_OPTS, self.conf)
         ri_kwargs = {'router': {'id': self.router_id,
                                 'project_id': self.project_id},
                      'agent_conf': self.conf,
