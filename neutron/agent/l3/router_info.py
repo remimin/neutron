@@ -177,6 +177,19 @@ class RouterInfo(object):
                  (floating_ip, fixed_ip)),
                 ('float-snat', to_source)]
 
+    def floating_v6_forward_rules(self, fip):
+        fixed_ip = fip['fixed_ip_address']
+        floating_ip = fip['floating_ip_address']
+        to_source = '-s %s/128 -j SNAT --to-source %s' \
+                    % (fixed_ip, floating_ip)
+        if self.iptables_manager.random_fully:
+            to_source += ' --random-fully'
+        return [('PREROUTING', '-d %s/128 -j DNAT --to-destination %s' %
+                 (floating_ip, fixed_ip)),
+                ('OUTPUT', '-d %s/128 -j DNAT --to-destination %s' %
+                 (floating_ip, fixed_ip)),
+                ('float-snat', to_source)]
+
     def floating_mangle_rules(self, floating_ip, fixed_ip, internal_mark):
         mark_traffic_to_floating_ip = (
             'floatingip', '-d %s/32 -j MARK --set-xmark %s' % (
@@ -226,15 +239,14 @@ class RouterInfo(object):
             # Rebuild iptables rules for the floating ip.
             fip_ip = fip['floating_ip_address']
             addr = netaddr.IPAddress(fip_ip)
-            for chain, rule in self.floating_forward_rules(fip):
-                if addr.version == lib_constants.IP_VERSION_4:
+            if addr.version == lib_constants.IP_VERSION_4:
+                for chain, rule in self.floating_forward_rules(fip):
                     self.iptables_manager.ipv4['nat'].add_rule(chain, rule,
-                                                           tag='floating_ip')
-                else:
+                                                               tag='floating_ip')
+            else:
+                for chain, rule in self.floating_v6_forward_rules(fip):
                     self.iptables_manager.ipv6['nat'].add_rule(chain, rule,
-                                                           tag='floating_ip')
-
-
+                                                               tag='floating_ip')
         self.iptables_manager.apply()
 
     def _process_pd_iptables_rules(self, prefix, subnet_id):

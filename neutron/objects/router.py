@@ -284,7 +284,7 @@ class FloatingIP(base.NeutronDbObject):
         # Outer join of Subnet can cause each ip to have more than one row.
         query = query.outerjoin(models_v2.Subnet,
             models_v2.Subnet.network_id == models_v2.Port.network_id)
-        query = query.filter(models_v2.Subnet.ip_version == 4)
+        # query = query.filter(models_v2.Subnet.ip_version == 4)
         query = query.outerjoin(models_v2.SubnetPool,
             models_v2.Subnet.subnetpool_id == models_v2.SubnetPool.id)
 
