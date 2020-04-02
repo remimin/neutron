@@ -76,6 +76,9 @@ listen %(pxname)s
     mode tcp
     option tcplog
     option tcpka
+    timeout connect         120s
+    timeout client          122s
+    timeout server          122s
     bind %(host)s:%(port)s
     server %(svrname)s %(unix_socket_path)s
 """
