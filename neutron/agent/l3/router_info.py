@@ -238,6 +238,8 @@ class RouterInfo(object):
         for fip in floating_ips:
             # Rebuild iptables rules for the floating ip.
             fip_ip = fip['floating_ip_address']
+            if fip['fixed_ip_address'] is None:
+                continue
             addr = netaddr.IPAddress(fip_ip)
             if addr.version == lib_constants.IP_VERSION_4:
                 for chain, rule in self.floating_forward_rules(fip):
@@ -304,6 +306,8 @@ class RouterInfo(object):
             addr = netaddr.IPAddress(fip_ip)
             # Send the floating ip traffic to the right address scope
             fixed_ip = fip['fixed_ip_address']
+            if fixed_ip is None:
+                continue
             fixed_scope = fip.get('fixed_ip_address_scope')
             internal_mark = self.get_address_scope_mark_mask(fixed_scope)
             mangle_rules = self.floating_mangle_rules(
@@ -383,6 +387,8 @@ class RouterInfo(object):
         floating_ips = self.get_floating_ips()
         # Loop once to ensure that floating ips are configured.
         for fip in floating_ips:
+            if fip['fixed_ip_address'] is None:
+                continue
             fip_ip = fip['floating_ip_address']
             ip_cidr = common_utils.ip_to_cidr(fip_ip)
             new_cidrs.add(ip_cidr)

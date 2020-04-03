@@ -19,6 +19,7 @@ from neutron_lib.api.validators import availability_zone as az_validator
 from oslo_versionedobjects import fields as obj_fields
 import six
 from sqlalchemy import func
+from sqlalchemy import and_
 
 from neutron.common import constants as n_const
 from neutron.common import utils
@@ -293,6 +294,14 @@ class FloatingIP(base.NeutronDbObject):
         return cls._unique_floatingip_iterator(context, query)
 
     @classmethod
+    def get_gw_floating_ip(cls, context, router_ids):
+        # Filter out on router_ids and fixed_port_id as None
+        query = context.session.query(l3.FloatingIP)
+        query = query.filter(and_(l3.FloatingIP.router_id.in_(router_ids),
+                                  l3.FloatingIP.fixed_port_id.is_(None)))
+        return cls._unique_gw_floatingip_iterator(context, query)
+
+    @classmethod
     def _unique_floatingip_iterator(cls, context, query):
         """Iterates over only one row per floating ip. Ignores others."""
         # Group rows by fip id. They must be sorted by same.
@@ -304,3 +313,17 @@ class FloatingIP(base.NeutronDbObject):
         for key, value in group_iterator:
             row = [r for r in six.next(value)]
             yield (cls._load_object(context, row[0]), row[1])
+
+    @classmethod
+    def _unique_gw_floatingip_iterator(cls, context, query):
+        """Iterates over only one row per floating ip. Ignores others."""
+        # Group rows by fip id. They must be sorted by same.
+        q = query.order_by(l3.FloatingIP.id)
+        keyfunc = lambda row: row['id']
+        group_iterator = itertools.groupby(q, keyfunc)
+
+        # Just hit the first row of each group
+        for key, value in group_iterator:
+            row = six.next(value)
+            yield cls._load_object(context, row)
+

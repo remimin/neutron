@@ -37,6 +37,7 @@ from neutron_lib.services import base as base_services
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 from sqlalchemy import orm
+from sqlalchemy import and_
 from sqlalchemy.orm import exc
 
 from neutron._i18n import _
@@ -405,6 +406,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 )
                 context.session.add(router)
                 router_port.create()
+
                 gw_to_fip = l3_obj.FloatingIP(
                     context,
                     project_id=router['project_id'],
@@ -412,6 +414,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                     floating_ip_address=gw_port['fixed_ips'][0]['ip_address'],
                     floating_network_id=network_id,
                     floating_port_id=gw_port['id'],
+                    router_id=router.id,
                     status=constants.FLOATINGIP_STATUS_ACTIVE,
                     #standard_attr_id='111'
                 )
@@ -442,7 +445,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
     def router_gw_port_has_floating_ips(self, context, router_id):
         """Return True if the router's gateway port is serving floating IPs."""
         return bool(self.get_floatingips_count(context,
-                                               {'router_id': [router_id]}))
+                                               {'router_id': [router_id]})-1)
 
     def _delete_current_gw_port(self, context, router_id, router,
                                 new_network_id):
@@ -1547,6 +1550,16 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         # codes are migrated to use Floating IP OVO object.
         resource_extend.apply_funcs(l3_apidef.FLOATINGIPS, floatingip_dict,
                                     floatingip_db)
+
+        # Determine if it is gateway ip, and manually notify l3-agent
+        if floatingip_dict['router_id'] and old_floatingip['fixed_ip_address'] is None \
+            and floatingip_dict['fixed_ip_address'] is None:
+            router_id = floatingip_dict['router_id']
+            router_ids = list()
+            router_ids.append(router_id)
+            l3_rpc_notifier = l3_rpc_agent_api.L3AgentNotifyAPI()
+            l3_rpc_notifier.routers_updated(context, router_ids, 'update_floatingip')
+
         return old_floatingip, floatingip_dict
 
     def _floatingips_to_router_ids(self, floatingips):
@@ -1773,6 +1786,10 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         d['fixed_ip_address_scope'] = scope_id
         return d
 
+    def _make_gw_floatingip_dict(self, floatingip_obj):
+        d = self._make_floatingip_dict(floatingip_obj)
+        return d
+
     def _get_sync_floating_ips(self, context, router_ids):
         """Query floating_ips that relate to list of router_ids with scope.
 
@@ -1789,6 +1806,10 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         return [
             self._make_floatingip_dict_with_scope(*scoped_fip)
             for scoped_fip in l3_obj.FloatingIP.get_scoped_floating_ips(
+                context, router_ids)
+        ] + [
+            self._make_gw_floatingip_dict(gw_fip)
+            for gw_fip in l3_obj.FloatingIP.get_gw_floating_ip(
                 context, router_ids)
         ]
 
