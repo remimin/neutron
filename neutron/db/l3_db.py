@@ -445,8 +445,12 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
     # inheriting this class.  Do not optimize this out.
     def router_gw_port_has_floating_ips(self, context, router_id):
         """Return True if the router's gateway port is serving floating IPs."""
+        # Since each gateway ip is also regarded as a fip
+        # minus the number of gateway ips
         return bool(self.get_floatingips_count(context,
-                                               {'router_id': [router_id]})-1)
+                                               {'router_id': [router_id]})-
+                    l3_obj.FloatingIP.get_gw_floating_ip_count_by_router
+                    (context, router_id))
 
     def _delete_current_gw_port(self, context, router_id, router,
                                 new_network_id):

@@ -294,6 +294,13 @@ class FloatingIP(base.NeutronDbObject):
         return cls._unique_floatingip_iterator(context, query)
 
     @classmethod
+    def get_gw_floating_ip_count_by_router(cls, context, router_id):
+        query = context.session.query(l3.FloatingIP)
+        query = query.filter(and_(l3.FloatingIP.router_id == router_id,
+                                  l3.FloatingIP.fixed_port_id.is_(None)))
+        return len(query.all())
+
+    @classmethod
     def get_gw_floating_ip(cls, context, router_ids):
         # Filter out on router_ids and fixed_port_id as None
         query = context.session.query(l3.FloatingIP)
