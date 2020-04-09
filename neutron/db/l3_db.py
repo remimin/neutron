@@ -407,18 +407,19 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 context.session.add(router)
                 router_port.create()
 
-                gw_to_fip = l3_obj.FloatingIP(
-                    context,
-                    project_id=router['project_id'],
-                    id=uuidutils.generate_uuid(),
-                    floating_ip_address=gw_port['fixed_ips'][0]['ip_address'],
-                    floating_network_id=network_id,
-                    floating_port_id=gw_port['id'],
-                    router_id=router.id,
-                    status=constants.FLOATINGIP_STATUS_ACTIVE,
-                    #standard_attr_id='111'
-                )
-                gw_to_fip.create()
+                for fixed_ip in gw_port['fixed_ips']:
+                    gw_to_fip = l3_obj.FloatingIP(
+                        context,
+                        project_id=router['project_id'],
+                        id=uuidutils.generate_uuid(),
+                        floating_ip_address=fixed_ip['ip_address'],
+                        floating_network_id=network_id,
+                        floating_port_id=gw_port['id'],
+                        router_id=router.id,
+                        status=constants.FLOATINGIP_STATUS_ACTIVE,
+                        # standard_attr_id='111'
+                    )
+                    gw_to_fip.create()
 
     def _validate_gw_info(self, context, gw_port, info, ext_ips):
         network_id = info['network_id'] if info else None
@@ -1552,8 +1553,9 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                                     floatingip_db)
 
         # Determine if it is gateway ip, and manually notify l3-agent
-        if floatingip_dict['router_id'] and old_floatingip['fixed_ip_address'] is None \
-            and floatingip_dict['fixed_ip_address'] is None:
+        if floatingip_dict['router_id'] and \
+                old_floatingip['fixed_ip_address'] is None and \
+                floatingip_dict['fixed_ip_address'] is None:
             router_id = floatingip_dict['router_id']
             router_ids = list()
             router_ids.append(router_id)
