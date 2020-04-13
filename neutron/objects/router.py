@@ -16,7 +16,6 @@ import netaddr
 
 from neutron_lib.api.definitions import availability_zone as az_def
 from neutron_lib.api.validators import availability_zone as az_validator
-from neutron_lib import constants
 from oslo_versionedobjects import fields as obj_fields
 import six
 from sqlalchemy import func
