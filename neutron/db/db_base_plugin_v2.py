@@ -63,6 +63,7 @@ from neutron.objects import base as base_obj
 from neutron.objects import ports as port_obj
 from neutron.objects import subnet as subnet_obj
 from neutron.objects import subnetpool as subnetpool_obj
+from neutron.objects import router as l3_obj
 
 
 LOG = logging.getLogger(__name__)
@@ -1317,7 +1318,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             p['mac_address'] = db_port['mac_address']
 
             try:
-                self.ipam.allocate_ips_for_port_and_store(
+                port_fixed_ips = self.ipam.allocate_ips_for_port_and_store(
                     context, port, port_id)
                 db_port['ip_allocation'] = (ipalloc_apidef.
                                             IP_ALLOCATION_IMMEDIATE)
@@ -1329,7 +1330,44 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                 # [] was passed explicitly as fixed_ips. An unaddressed port.
                 db_port['ip_allocation'] = ipalloc_apidef.IP_ALLOCATION_NONE
 
+        try:
+            # Ensure that the port does not belong to a router or dhcp server
+            if not p['device_owner'] or p['device_owner'].startswith \
+                        (constants.DEVICE_OWNER_COMPUTE_PREFIX):
+                for port_fixed_ip in port_fixed_ips:
+                    if netaddr.IPAddress(port_fixed_ip['ip_address']).version \
+                            == constants.IP_VERSION_6:
+                        self._convert_port_ipv6_addr_to_fip(context,
+                                                            port_id,
+                                                            network_id,
+                                                            port_fixed_ip,
+                                                            p['tenant_id'])
+        except Exception as e:
+            msg = _("IPv6 address belonging to the port %s "
+                    "failed to convert to floatingip, because %s") \
+                  % (port_id, e)
+            raise exc.BadRequest(resource='floatingip', msg=msg)
+
         return db_port
+
+    def _convert_port_ipv6_addr_to_fip(self, context,
+                                       port_id, network_id,
+                                       port_fixed_ip, project_id):
+        fip_address = port_fixed_ip['ip_address']
+        subnet_id = port_fixed_ip['subnet_id']
+        router_id = l3_obj.RouterPort.get_router_id_by_subnet(context,
+                                                              subnet_id)
+        port_ipv6_addr_to_fip = l3_obj.FloatingIP(
+            context,
+            project_id=project_id,
+            id=uuidutils.generate_uuid(),
+            floating_ip_address=fip_address,
+            floating_network_id=network_id,
+            floating_port_id=port_id,
+            router_id=router_id,
+            status=constants.FLOATINGIP_STATUS_ACTIVE,
+        )
+        port_ipv6_addr_to_fip.create()
 
     def _validate_port_for_update(self, context, db_port, new_port, new_mac):
         changed_owner = 'device_owner' in new_port

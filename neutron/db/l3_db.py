@@ -449,7 +449,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         # minus the number of gateway ips
         return bool(self.get_floatingips_count(context,
                                                {'router_id': [router_id]})-
-                    l3_obj.FloatingIP.get_gw_floating_ip_count_by_router
+                    l3_obj.FloatingIP.get_gw_and_ipv6_port_fip_count_by_router
                     (context, router_id))
 
     def _delete_current_gw_port(self, context, router_id, router,

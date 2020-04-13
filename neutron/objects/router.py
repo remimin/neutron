@@ -16,10 +16,11 @@ import netaddr
 
 from neutron_lib.api.definitions import availability_zone as az_def
 from neutron_lib.api.validators import availability_zone as az_validator
+from neutron_lib import constants
 from oslo_versionedobjects import fields as obj_fields
 import six
 from sqlalchemy import func
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 
 from neutron.common import constants as n_const
 from neutron.common import utils
@@ -156,6 +157,18 @@ class RouterPort(base.NeutronDbObject):
             l3.RouterPort.port_type.in_(n_const.ROUTER_PORT_OWNERS))
         query = query.distinct()
         return [r[0] for r in query]
+
+    @classmethod
+    def get_router_id_by_subnet(cls, context, subnet_id):
+        query = context.session.query(l3.RouterPort.router_id)
+        query = query.join(models_v2.Port)
+        query = query.join(
+            models_v2.Subnet,
+            models_v2.Subnet.network_id == models_v2.Port.network_id)
+        query = query.filter(
+            models_v2.Subnet.id == subnet_id)
+        query = query.distinct().all()
+        return query[0][0]
 
 
 @base.NeutronObjectRegistry.register
@@ -294,11 +307,11 @@ class FloatingIP(base.NeutronDbObject):
         return cls._unique_floatingip_iterator(context, query)
 
     @classmethod
-    def get_gw_floating_ip_count_by_router(cls, context, router_id):
+    def get_gw_and_ipv6_port_fip_count_by_router(cls, context, router_id):
         query = context.session.query(l3.FloatingIP)
         query = query.filter(and_(l3.FloatingIP.router_id == router_id,
                                   l3.FloatingIP.fixed_port_id.is_(None)))
-        return len(query.all())
+        return query.count()
 
     @classmethod
     def get_gw_floating_ip(cls, context, router_ids):
