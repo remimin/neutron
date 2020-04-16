@@ -33,6 +33,7 @@ from neutron.ipam import exceptions as ipam_exc
 from neutron.objects import ports as port_obj
 from neutron.objects import subnet as obj_subnet
 
+from neutron_lib.plugins import directory
 
 LOG = logging.getLogger(__name__)
 
@@ -227,6 +228,53 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                     ips.append([{'subnet_id': s['id']}
                                 for s in subnets])
 
+        # For private floating handle
+        ignore_types = [
+            constants.DEVICE_OWNER_FLOATINGIP,
+            constants.DEVICE_OWNER_DHCP,
+            constants.DEVICE_OWNER_ROUTER_GW,
+            constants.DEVICE_OWNER_AGENT_GW,
+            constants.DEVICE_OWNER_ROUTER_HA_INTF,
+            constants.DEVICE_OWNER_FLOATINGIP,
+        ]
+        for owner_type in constants.ROUTER_INTERFACE_OWNERS_SNAT:
+            ignore_types.append(owner_type)
+        
+        
+        need_allocate_privatefloating = True
+        plugin = directory.get_plugin()
+        
+        if p['device_owner'] in ignore_types:
+            need_allocate_privatefloating = False
+        
+        #external network or network has tag noprivatefloating will not allocate privatefloating ip
+        if need_allocate_privatefloating:
+            network_detail = plugin.get_network(context,p['network_id'])
+            is_external_network = network_detail.get('router:external',False)
+            network_tags = network_detail.get('tags',[])
+            if is_external_network or network_tags.count('disableprivatefloating') > 0:
+                need_allocate_privatefloating = False
+		
+        if need_allocate_privatefloating and plugin.is_privatefloating_enabled():
+            privatefloating_network = plugin.get_privatefloating_network(context)
+            
+            if not privatefloating_network:
+                LOG.warning("Private floating network enabled, but network is not exit.")
+            elif privatefloating_network['id'] != p['network_id']:
+                pfip_v4 = []
+                pfip_v6 = []
+                
+                for s in privatefloating_network['subnets_detail']:
+                    if s['ip_version'] == 4:
+                        if not len(pfip_v4):
+                            pfip_v4 = [{'subnet_id': s['id']}]
+                            ips.append(pfip_v4)
+                    elif s['ip_version'] == 6:
+                        if not len(pfip_v6):
+                            pfip_v6 = [{'subnet_id': s['id']}]
+                            ips.append(pfip_v6)
+        # End for private floating       
+                
         ips.extend(self._get_auto_address_ips(v6_stateless, p))
 
         ipam_driver = driver.Pool.get_instance(None, context)

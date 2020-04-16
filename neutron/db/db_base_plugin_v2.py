@@ -1485,3 +1485,27 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                             device_id=device_id)
                 if tenant_id != router['tenant_id']:
                     raise n_exc.DeviceIDNotOwnedByTenant(device_id=device_id)
+
+    def is_privatefloating_enabled(self):
+        return cfg.CONF.privatefloating.enable_privatefloating
+    
+    def get_privatefloating_network(self, context):
+        if self.is_privatefloating_enabled():
+            try:
+                privatefloating_network_dict = \
+                    self.get_network(context, cfg.CONF.privatefloating.privatefloating_network)
+                privatefloating_network_dict['subnets_detail'] = \
+                    self.get_subnets(context, filters = {
+                                        'network_id':[cfg.CONF.privatefloating.privatefloating_network]
+                                        }) 
+                return privatefloating_network_dict
+            
+            except Exception as e:
+                LOG.warning("privatefloating network %s is not exists! ", 
+                           cfg.CONF.privatefloating.privatefloating_network)
+                return None
+        return None
+    
+    def get_privatefloating_arp_timeout(self):
+        return cfg.CONF.privatefloating.arp_timeout
+    
