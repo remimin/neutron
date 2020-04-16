@@ -71,8 +71,8 @@ class FloatingIPTcCommandBase(ip_lib.IPDevice):
                'parent', qdisc_id, 'prio', 1]
         return self._execute_tc_cmd(cmd)
 
-    def _get_filters_ips_map_v4(self, qdisc_id, ip):
-        filter_ip_map = dict()
+    def _get_filterid_for_ipv4(self, qdisc_id, ip):
+        filterids_for_ip = list()
         filter_id = ''
         is_first_match_line = bool()
         cmd = ['-s', '-d', 'filter', 'show', 'dev', self.name,
@@ -93,10 +93,10 @@ class FloatingIPTcCommandBase(ip_lib.IPDevice):
                 ipv4_addr = '0x' + m_ipv4_addr.group(1)
                 ipv4_header_offset = m_ipv4_addr.group(2)
                 if ipv4_header_offset in IPV4_START_OF_HEADER_OFFSET:
-                    filter_ip_map[filter_id] = \
-                        str(netaddr.IPAddress(ipv4_addr))
+                    if ip == str(netaddr.IPAddress(ipv4_addr)):
+                        filterids_for_ip.append(filter_id)
             is_first_match_line = False
-        return filter_ip_map
+        return filterids_for_ip
 
     @staticmethod
     def _format_ipv6_address(ipv6_addr_offset_map):
@@ -111,9 +111,9 @@ class FloatingIPTcCommandBase(ip_lib.IPDevice):
         ipv6_addr = ipv6_addr[:-1]
         return ipv6_addr
 
-    def _get_filters_ips_map_v6(self, qdisc_id, ip):
+    def _get_filterid_for_ipv6(self, qdisc_id, ip):
         ipv6_addr_offset_map = dict()
-        filter_ip_map = dict()
+        filterids_for_ip = list()
         filter_id = ''
         cmd = ['-s', '-d', 'filter', 'show', 'dev', self.name,
                'parent', qdisc_id, 'prio', 1]
@@ -138,24 +138,18 @@ class FloatingIPTcCommandBase(ip_lib.IPDevice):
                 if ipv6_header_offset in IPV6_END_OF_HEADER_OFFSET:
                     ipv6_addr = \
                         self._format_ipv6_address(ipv6_addr_offset_map)
-                    filter_ip_map[filter_id] = ipv6_addr
+                    if socket.inet_pton(socket.AF_INET6, ip) == \
+                            socket.inet_pton(socket.AF_INET6, ipv6_addr):
+                        filterids_for_ip.append(filter_id)
                     filter_id = ''
                     ipv6_addr_offset_map.clear()
-        return filter_ip_map
+        return filterids_for_ip
 
     def _get_filterid_for_ip(self, qdisc_id, ip):
-        filterids_for_ip = list()
         if netaddr.IPAddress(ip).version == constants.IP_VERSION_4:
-            filters_ips_map = self._get_filters_ips_map_v4(qdisc_id, ip)
-            for key, value in filters_ips_map.items():
-                if ip == value:
-                    filterids_for_ip.append(key)
+            filterids_for_ip = self._get_filterid_for_ipv4(qdisc_id, ip)
         else:
-            filters_ips_map = self._get_filters_ips_map_v6(qdisc_id, ip)
-            for key, value in filters_ips_map.items():
-                if socket.inet_pton(socket.AF_INET6, ip) == \
-                        socket.inet_pton(socket.AF_INET6, value):
-                    filterids_for_ip.append(key)
+            filterids_for_ip = self._get_filterid_for_ipv6(qdisc_id, ip)
         if len(filterids_for_ip) > 1:
             raise exceptions.MultipleFilterIDForIPFound(ip=ip)
         elif len(filterids_for_ip) == 0:
