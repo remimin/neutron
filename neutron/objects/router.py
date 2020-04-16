@@ -216,6 +216,7 @@ class Router(base.NeutronDbObject):
         'admin_state_up': obj_fields.BooleanField(nullable=True),
         'gw_port_id': common_types.UUIDField(nullable=True),
         'enable_snat': obj_fields.BooleanField(default=True),
+        'enable_snat66': obj_fields.BooleanField(default=False),
         'flavor_id': common_types.UUIDField(nullable=True),
         'extra_attributes': obj_fields.ObjectField(
             'RouterExtraAttributes', nullable=True),

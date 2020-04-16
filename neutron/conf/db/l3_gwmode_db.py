@@ -19,6 +19,9 @@ from neutron._i18n import _
 L3GWMODE_OPTS = [
     cfg.BoolOpt('enable_snat_by_default', default=True,
                 help=_('Define the default value of enable_snat if not '
+                       'provided in external_gateway_info.')),
+    cfg.BoolOpt('enable_snat66_by_default', default=False,
+                help=_('Define the default value of enable_snat66 if not '
                        'provided in external_gateway_info.'))
 ]
 

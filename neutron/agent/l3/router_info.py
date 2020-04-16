@@ -55,6 +55,7 @@ class RouterInfo(object):
         self.agent_conf = agent_conf
         self.ex_gw_port = None
         self._snat_enabled = None
+        self._snat66_enabled = None
         self.fip_map = {}
         self.internal_ports = []
         self.pd_subnets = {}
@@ -118,6 +119,8 @@ class RouterInfo(object):
             return
         # enable_snat by default if it wasn't specified by plugin
         self._snat_enabled = self._router.get('enable_snat', True)
+        # disable_snat66 by default if it wasn't specified by plugin
+        self._snat66_enabled = self._router.get('enable_snat66', False)
 
     def is_router_master(self):
         return True
@@ -956,7 +959,7 @@ class RouterInfo(object):
             for ip_addr in ex_gw_port['fixed_ips']:
                 ex_gw_ip = ip_addr['ip_address']
                 if netaddr.IPAddress(ex_gw_ip).version == 6:
-                    if self._snat_enabled:
+                    if self._snat66_enabled:
                         rules = self.external_gateway_nat_snat_rules(
                             ex_gw_ip, interface_name)
                         for rule in rules:

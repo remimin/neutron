@@ -51,6 +51,8 @@ def upgrade():
         sa.Column('gw_port_id', sa.String(length=36), nullable=True),
         sa.Column('enable_snat', sa.Boolean(), nullable=False,
                   server_default=sa.sql.true()),
+        sa.Column('enable_snat66', sa.Boolean(), nullable=False,
+                  server_default=sa.sql.false()),
         sa.ForeignKeyConstraint(['gw_port_id'], ['ports.id'], ),
         sa.PrimaryKeyConstraint('id'))
 
