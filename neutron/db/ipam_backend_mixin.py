@@ -45,6 +45,8 @@ from neutron.objects import network as network_obj
 from neutron.objects import subnet as subnet_obj
 from neutron.services.segments import exceptions as segment_exc
 
+from neutron_lib.plugins import directory
+
 LOG = logging.getLogger(__name__)
 
 
@@ -786,6 +788,20 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
                     context, old_port['network_id'], host,
                     service_type=old_port.get('device_owner'))
                 valid_subnet_ids = {s['id'] for s in valid_subnets}
+                
+                # For private floating handle
+                private_subnets = []
+                plugin = directory.get_plugin()
+                
+                if plugin.is_privatefloating_enabled():
+                    privatefloating_network = plugin.get_privatefloating_network(context)
+                    if privatefloating_network:
+                        private_subnets = privatefloating_network['subnets']
+                        
+                for s1 in private_subnets:
+                    valid_subnet_ids.add(s1)
+                # End for private floating
+                
                 for fixed_ip in old_ips:
                     if fixed_ip['subnet_id'] not in valid_subnet_ids:
                         raise segment_exc.HostNotCompatibleWithFixedIps(
