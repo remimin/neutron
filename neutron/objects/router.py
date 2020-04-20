@@ -166,6 +166,8 @@ class RouterPort(base.NeutronDbObject):
             models_v2.Subnet.network_id == models_v2.Port.network_id)
         query = query.filter(
             models_v2.Subnet.id == subnet_id)
+        if query.count() == 0:
+            return None
         query = query.distinct().all()
         return query[0][0]
 
@@ -290,6 +292,15 @@ class FloatingIP(base.NeutronDbObject):
         return result
 
     @classmethod
+    def get_ipv6_port_fip_by_subnet(cls, context, subnet_id):
+        query = context.session.query(l3.FloatingIP)
+        query = query.join(models_v2.IPAllocation,
+                           l3.FloatingIP.floating_ip_address ==
+                           models_v2.IPAllocation.ip_address)
+        query = query.filter(models_v2.IPAllocation.subnet_id == subnet_id)
+        return cls._unique_gw_and_ipv6_port_floatingip_iterator(context, query)
+
+    @classmethod
     def get_scoped_floating_ips(cls, context, router_ids):
         query = context.session.query(l3.FloatingIP,
                                       models_v2.SubnetPool.address_scope_id)
@@ -314,12 +325,12 @@ class FloatingIP(base.NeutronDbObject):
         return query.count()
 
     @classmethod
-    def get_gw_floating_ip(cls, context, router_ids):
+    def get_gw_and_ipv6_port_floating_ip(cls, context, router_ids):
         # Filter out on router_ids and fixed_port_id as None
         query = context.session.query(l3.FloatingIP)
         query = query.filter(and_(l3.FloatingIP.router_id.in_(router_ids),
                                   l3.FloatingIP.fixed_port_id.is_(None)))
-        return cls._unique_gw_floatingip_iterator(context, query)
+        return cls._unique_gw_and_ipv6_port_floatingip_iterator(context, query)
 
     @classmethod
     def _unique_floatingip_iterator(cls, context, query):
@@ -335,7 +346,7 @@ class FloatingIP(base.NeutronDbObject):
             yield (cls._load_object(context, row[0]), row[1])
 
     @classmethod
-    def _unique_gw_floatingip_iterator(cls, context, query):
+    def _unique_gw_and_ipv6_port_floatingip_iterator(cls, context, query):
         """Iterates over only one row per floating ip. Ignores others."""
         # Group rows by fip id. They must be sorted by same.
         q = query.order_by(l3.FloatingIP.id)
