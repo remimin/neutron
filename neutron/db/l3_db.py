@@ -1595,7 +1595,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
             router_ids = list()
             router_ids.append(router_id)
             l3_rpc_notifier = l3_rpc_agent_api.L3AgentNotifyAPI()
-            l3_rpc_notifier.routers_updated(context, router_ids, 'update_floatingip')
+            l3_rpc_notifier.routers_updated(context,
+                                            router_ids, 'update_floatingip')
 
         return old_floatingip, floatingip_dict
 
@@ -1847,7 +1848,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         ] + [
             self._make_gw_floatingip_dict(gw_and_ipv6_port_fip)
             for gw_and_ipv6_port_fip in
-            l3_obj.FloatingIP.get_gw_and_ipv6_port_floating_ip(context, router_ids)
+            l3_obj.FloatingIP.get_gw_and_ipv6_port_floating_ip(context,
+                                                               router_ids)
         ]
 
     def _get_sync_interfaces(self, context, router_ids, device_owners=None):
