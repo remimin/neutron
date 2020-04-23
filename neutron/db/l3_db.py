@@ -962,7 +962,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
             if subnet['ip_version'] == 6:
                 subnet_id = subnet['id']
                 fips_of_subnets = \
-                    [self._make_gw_floatingip_dict(fips_obj_of_subnets)
+                    [self._make_ipv6_port_floatingip_dict(fips_obj_of_subnets)
                      for fips_obj_of_subnets in
                      l3_obj.FloatingIP.get_ipv6_port_fip_by_subnet(context,
                                                                    subnet_id)]
@@ -1122,7 +1122,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
             if subnet['ip_version'] == 6:
                 subnet_id = subnet['id']
                 fips_of_subnets = \
-                    [self._make_gw_floatingip_dict(fips_obj_of_subnets)
+                    [self._make_ipv6_port_floatingip_dict(fips_obj_of_subnets)
                      for fips_obj_of_subnets in
                      l3_obj.FloatingIP.get_ipv6_port_fip_by_subnet(context,
                                                                    subnet_id)]
@@ -1824,7 +1824,11 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         d['fixed_ip_address_scope'] = scope_id
         return d
 
-    def _make_gw_floatingip_dict(self, floatingip_obj):
+    def _make_gw_and_ipv6_port_floatingip_dict(self, floatingip_obj):
+        d = self._make_floatingip_dict(floatingip_obj)
+        return d
+
+    def _make_ipv6_port_floatingip_dict(self, floatingip_obj):
         d = self._make_floatingip_dict(floatingip_obj)
         return d
 
@@ -1846,7 +1850,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
             for scoped_fip in l3_obj.FloatingIP.get_scoped_floating_ips(
                 context, router_ids)
         ] + [
-            self._make_gw_floatingip_dict(gw_and_ipv6_port_fip)
+            self._make_gw_and_ipv6_port_floatingip_dict(gw_and_ipv6_port_fip)
             for gw_and_ipv6_port_fip in
             l3_obj.FloatingIP.get_gw_and_ipv6_port_floating_ip(context,
                                                                router_ids)
