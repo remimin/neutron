@@ -34,6 +34,10 @@ l3_gwmode_db.register_db_l3_gwmode_opts()
 setattr(l3_models.Router, 'enable_snat',
         sa.Column(sa.Boolean, default=True, server_default=sql.true(),
                   nullable=False))
+# Modify the Router Data Model adding the enable_snat66 attribute
+setattr(l3_models.Router, 'enable_snat66',
+        sa.Column(sa.Boolean, default=False, server_default=sql.false(),
+                  nullable=False))
 
 
 @resource_extend.has_resource_extenders
@@ -48,6 +52,7 @@ class L3_NAT_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
             router_res[l3_apidef.EXTERNAL_GW_INFO] = {
                 'network_id': nw_id,
                 'enable_snat': router_db.enable_snat,
+                'enable_snat66': router_db.enable_snat66,
                 'external_fixed_ips': [
                     {'subnet_id': ip["subnet_id"],
                      'ip_address': ip["ip_address"]}
@@ -62,6 +67,7 @@ class L3_NAT_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
         with context.session.begin(subtransactions=True):
             old_router = self._make_router_dict(router)
             router.enable_snat = self._get_enable_snat(info)
+            router.enable_snat66 = self._get_enable_snat66(info)
             router_body = {l3_apidef.ROUTER:
                 {l3_apidef.EXTERNAL_GW_INFO: info}}
             registry.publish(resources.ROUTER, events.PRECOMMIT_UPDATE, self,
@@ -84,6 +90,13 @@ class L3_NAT_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
         # if enable_snat is not specified then use the default value
         return cfg.CONF.enable_snat_by_default
 
+    @staticmethod
+    def _get_enable_snat66(info):
+        if info and 'enable_snat66' in info:
+            return info['enable_snat66']
+        # if enable_snat66 is not specified then use the default value
+        return cfg.CONF.enable_snat66_by_default
+
     def _build_routers_list(self, context, routers, gw_ports):
         routers = super(L3_NAT_dbonly_mixin, self)._build_routers_list(
             context, routers, gw_ports)
@@ -95,6 +108,9 @@ class L3_NAT_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
                 # Add enable_snat key
                 rtr['enable_snat'] = rtr[
                     l3_apidef.EXTERNAL_GW_INFO]['enable_snat']
+                # Add enable_snat66 key
+                rtr['enable_snat66'] = rtr[
+                    l3_apidef.EXTERNAL_GW_INFO]['enable_snat66']
         return routers
 
 
