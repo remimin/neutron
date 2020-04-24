@@ -123,6 +123,12 @@ class PluginApi(object):
         cctxt = self.client.prepare(version='1.3')
         return cctxt.call(context, 'get_devices_details_list',
                           devices=devices, agent_id=agent_id, host=host)
+        
+    def get_privatefloating_info(self, context, agent_id, host=None):
+        cctxt = self.client.prepare(version='1.3')
+        return cctxt.call(context, 'get_privatefloating_info',
+                          agent_id=agent_id, 
+                          host=host)
 
     def get_devices_details_list_and_failed_devices(self, context, devices,
                                                     agent_id, host=None,

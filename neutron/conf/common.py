@@ -130,7 +130,7 @@ core_opts = [
                       'this value without modification. For overlay networks '
                       'such as VXLAN, neutron automatically subtracts the '
                       'overlay protocol overhead from this value. Defaults '
-                      'to 1500, the standard value for Ethernet.'))
+                      'to 1500, the standard value for Ethernet.')),
 ]
 
 core_cli_opts = [
@@ -139,7 +139,6 @@ core_cli_opts = [
                help=_("Where to store Neutron state files. "
                       "This directory must be writable by the agent.")),
 ]
-
 
 def register_core_common_config_opts(cfg=cfg.CONF):
     cfg.register_opts(core_opts)
@@ -183,3 +182,20 @@ placement_opts = [
 
 def register_placement_opts(cfg=cfg.CONF):
     cfg.register_opts(placement_opts, group=PLACEMENT_CONF_SECTION)
+
+
+PRIVATEFLOATING_CONF_SECTION = 'privatefloating'
+
+privatefloating_opts = [
+    cfg.BoolOpt('enable_privatefloating', default=False,
+                help=_('If True, then allow privatefloating'
+                       'when a port be created, additional ip will be allocated '
+                       'attach to the port from privatefloating subnet')),
+    cfg.StrOpt('privatefloating_network', default='',
+               help=_("The network uuid to be used for privatefloating ")),
+    cfg.IntOpt('arp_timeout', default=300,
+               help=_("ARP responser flow exist time for aged, unit is seconds")),
+]
+
+def register_privatefloating_opts(cfg=cfg.CONF):
+    cfg.register_opts(privatefloating_opts, group=PRIVATEFLOATING_CONF_SECTION)

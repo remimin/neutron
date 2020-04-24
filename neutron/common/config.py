@@ -70,6 +70,9 @@ ks_loading.register_session_conf_options(cfg.CONF,
 # Register the placement configuration options
 common_config.register_placement_opts()
 
+# Register the privatefloating configuration options
+common_config.register_privatefloating_opts()
+
 logging.register_options(cfg.CONF)
 
 

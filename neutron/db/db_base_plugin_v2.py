@@ -174,6 +174,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             lib_db_api.sqla_listen(
                 models_v2.Port.status, 'set',
                 self.nova_notifier.record_port_status_changed)
+        self.privatefloating_subnet_dict = {}
 
     @registry.receives(resources.RBAC_POLICY, [events.BEFORE_CREATE,
                                                events.BEFORE_UPDATE,
@@ -1563,3 +1564,4 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             if len(self.privatefloating_subnet_dict) == 0:
                 self.get_privatefloating_network()
         return self.privatefloating_subnet_dict
+    

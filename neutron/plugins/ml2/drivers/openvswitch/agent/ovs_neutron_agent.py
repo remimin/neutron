@@ -46,6 +46,7 @@ from neutron.agent.common import ip_lib
 from neutron.agent.common import ovs_lib
 from neutron.agent.common import polling
 from neutron.agent.common import utils
+from neutron.conf.agent import common as agent_config
 from neutron.agent.l2 import l2_agent_extensions_manager as ext_manager
 from neutron.agent.linux import ovsdb_monitor
 from neutron.agent.linux import xenapi_root_helper
@@ -68,6 +69,8 @@ from neutron.plugins.ml2.drivers.openvswitch.agent \
     import ovs_capabilities
 from neutron.plugins.ml2.drivers.openvswitch.agent \
     import ovs_dvr_neutron_agent
+from neutron.plugins.ml2.drivers.openvswitch.agent \
+    import ovs_pfn_neutron_agent
 from neutron.plugins.ml2.drivers.openvswitch.agent import vlanmanager
 
 
@@ -157,7 +160,7 @@ class OVSNeutronAgent(l2population_rpc.L2populationRpcCallBackTunnelMixin,
         # TODO(ethuleau): Change ARP responder so it's not dependent on the
         #                 ML2 l2 population mechanism driver.
         self.enable_distributed_routing = agent_conf.enable_distributed_routing
-        self.arp_responder_enabled = agent_conf.arp_responder and self.l2_pop
+        self.arp_responder_enabled = agent_conf.arp_responder and self.l2_pop 
 
         host = self.conf.host
         self.agent_id = 'ovs-agent-%s' % host
@@ -240,6 +243,25 @@ class OVSNeutronAgent(l2population_rpc.L2populationRpcCallBackTunnelMixin,
 
         if self.enable_distributed_routing:
             self.dvr_agent.setup_dvr_flows()
+        
+        self.pfn_agent = ovs_pfn_neutron_agent.OVSPFNNeutronAgent(
+            self.context,
+            self.plugin_rpc,
+            self.conf,
+            self.agent_id,
+            self.int_br,
+            self.tun_br,
+            self.bridge_mappings,
+            self.phys_brs,
+            self.int_ofports,
+            self.phys_ofports,
+            self.patch_int_ofport,
+            self.patch_tun_ofport,
+            host,
+            self.enable_tunneling)
+        
+        if self.pfn_agent.is_privatefloating_enabled():
+            self.pfn_agent.setup_privatefloating()
 
         # Collect additional bridges to monitor
         self.ancillary_brs = self.setup_ancillary_bridges(
@@ -829,6 +851,8 @@ class OVSNeutronAgent(l2population_rpc.L2populationRpcCallBackTunnelMixin,
         self.dvr_agent.bind_port_to_dvr(port, lvm,
                                         fixed_ips,
                                         device_owner)
+        self.pfn_agent.bind_port_to_pfn(port, net_uuid, lvm, segmentation_id,
+                                        fixed_ips, device_owner)
         port_other_config = self.int_br.db_get_val("Port", port.port_name,
                                                    "other_config")
         if port_other_config is None:
@@ -1020,6 +1044,7 @@ class OVSNeutronAgent(l2population_rpc.L2populationRpcCallBackTunnelMixin,
         if vif_id in lvm.vif_ports:
             vif_port = lvm.vif_ports[vif_id]
             self.dvr_agent.unbind_port_from_dvr(vif_port, lvm)
+            self.pfn_agent.unbind_port_from_pfn(vif_port)
         lvm.vif_ports.pop(vif_id, None)
 
         if not lvm.vif_ports:
@@ -2115,6 +2140,15 @@ class OVSNeutronAgent(l2population_rpc.L2populationRpcCallBackTunnelMixin,
                                          self.patch_tun_ofport)
             self.dvr_agent.reset_dvr_parameters()
             self.dvr_agent.setup_dvr_flows()
+        
+        if self.pfn_agent.is_privatefloating_enabled():
+            self.pfn_agent.reset_ovs_parameters(self.int_br,
+                                         self.tun_br,
+                                         self.patch_int_ofport,
+                                         self.patch_tun_ofport)
+            self.pfn_agent.reset_pfn_parameters()
+            self.pfn_agent.setup_privatefloating()
+        
         # notify that OVS has restarted
         registry.notify(
             callback_resources.AGENT,
@@ -2364,6 +2398,9 @@ def prepare_xen_compute():
 def main(bridge_classes):
     prepare_xen_compute()
     ovs_capabilities.register()
+    agent_config.register_interface_opts(cfg.CONF)
+    agent_config.register_root_helper(cfg.CONF)
+    agent_config.setup_privsep()
     ext_manager.register_opts(cfg.CONF)
 
     ext_mgr = ext_manager.L2AgentExtensionsManager(cfg.CONF)

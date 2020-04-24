@@ -21,6 +21,7 @@ from neutron_lib import constants as n_const
 from neutron_lib.plugins import directory
 from neutron_lib.plugins.ml2 import api
 from neutron_lib.services.qos import constants as qos_consts
+from neutron_lib import exceptions as n_exc
 from oslo_log import log
 import oslo_messaging
 from sqlalchemy.orm import exc
@@ -389,6 +390,52 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                 'devices_down': devices_down,
                 'failed_devices_down': failed_devices_down}
 
+    def get_privatefloating_info(self, rpc_context, **kwargs):
+        """Device is up on agent."""
+        agent_id = kwargs.get('agent_id')
+        host = kwargs.get('host')
+        plugin = directory.get_plugin()
+        result_dict = {
+            'privatefloating_enable': plugin.is_privatefloating_enabled(),
+            'arp_timeout': plugin.get_privatefloating_arp_timeout()
+        }
+        
+        if plugin.is_privatefloating_enabled():
+            privatefloating_network = plugin.get_privatefloating_network(rpc_context)
+            if not privatefloating_network:
+                LOG.error("privatefloating is enabled but privatefloating network not exits")
+                result_dict['privatefloating_network'] = {}
+            else:
+                result_dict['privatefloating_network'] = privatefloating_network
+                
+                filters = {
+                    portbindings.HOST_ID: [host],
+                    'device_owner':[n_const.DEVICE_OWNER_PRIVATEFLOATING],
+                    'network_id': [privatefloating_network['id']]
+                }
+                
+                ports  = plugin.get_ports(rpc_context,filters=filters)
+                if len(ports) < 1:
+                    port_data = {
+                        'port': {
+                            'network_id': privatefloating_network['id'],
+                            'tenant_id': privatefloating_network['tenant_id'],
+                            'device_id': agent_id,
+                            'name': 'privatefloating port',
+                            'admin_state_up': True,
+                            #'fixed_ips': [],
+                            'fixed_ips': n_const.ATTR_NOT_SPECIFIED,
+                            'device_owner': n_const.DEVICE_OWNER_PRIVATEFLOATING,
+                            portbindings.HOST_ID: host
+                        }
+                    }
+                    port = plugin.create_port(rpc_context, port_data)
+                    result_dict['privatefloating_port'] = port
+                else:
+                    result_dict['privatefloating_port'] = ports[0]
+                LOG.debug(result_dict)
+        return result_dict
+            
 
 class AgentNotifierApi(dvr_rpc.DVRAgentRpcApiMixin,
                        sg_rpc.SecurityGroupAgentRpcApiMixin,
