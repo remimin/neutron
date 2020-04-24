@@ -68,6 +68,8 @@ DEVICE_OWNER_ROUTER_INTF = constants.DEVICE_OWNER_ROUTER_INTF
 DEVICE_OWNER_ROUTER_GW = constants.DEVICE_OWNER_ROUTER_GW
 DEVICE_OWNER_FLOATINGIP = constants.DEVICE_OWNER_FLOATINGIP
 EXTERNAL_GW_INFO = l3_apidef.EXTERNAL_GW_INFO
+DEVICE_OWNER_ROUTER_AND_DHCP = \
+    constants.ROUTER_INTERFACE_OWNERS + (constants.DEVICE_OWNER_DHCP,)
 
 # Maps API field to DB column
 # API parameter name and Database column names may differ.
@@ -407,19 +409,20 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 context.session.add(router)
                 router_port.create()
 
-                for fixed_ip in gw_port['fixed_ips']:
-                    gw_to_fip = l3_obj.FloatingIP(
-                        context,
-                        project_id=router['project_id'],
-                        id=uuidutils.generate_uuid(),
-                        floating_ip_address=fixed_ip['ip_address'],
-                        floating_network_id=network_id,
-                        floating_port_id=gw_port['id'],
-                        router_id=router.id,
-                        status=constants.FLOATINGIP_STATUS_ACTIVE,
-                        # standard_attr_id='111'
-                    )
-                    gw_to_fip.create()
+                if router['enable_snat66']:
+                    for fixed_ip in gw_port['fixed_ips']:
+                        gw_to_fip = l3_obj.FloatingIP(
+                            context,
+                            project_id=router['project_id'],
+                            id=uuidutils.generate_uuid(),
+                            floating_ip_address=fixed_ip['ip_address'],
+                            floating_network_id=network_id,
+                            floating_port_id=gw_port['id'],
+                            router_id=router.id,
+                            status=constants.FLOATINGIP_STATUS_ACTIVE,
+                            # standard_attr_id='111'
+                        )
+                        gw_to_fip.create()
 
     def _validate_gw_info(self, context, gw_port, info, ext_ips):
         network_id = info['network_id'] if info else None
@@ -958,20 +961,28 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         with context.session.begin(subtransactions=True):
             context.session.refresh(router)
 
-        for subnet in subnets:
-            if subnet['ip_version'] == 6:
-                subnet_id = subnet['id']
-                fips_of_subnets = \
-                    [self._make_ipv6_port_floatingip_dict(fips_obj_of_subnets)
-                     for fips_obj_of_subnets in
-                     l3_obj.FloatingIP.get_ipv6_port_fip_by_subnet(context,
-                                                                   subnet_id)]
-                for fip in fips_of_subnets:
-                    floatingip_obj = self._get_floatingip(context, fip['id'])
-                    if floatingip_obj.router_id == router_id:
-                        continue
-                    floatingip_obj.router_id = router_id
-                    floatingip_obj.update()
+        if not router.enable_snat66:
+            for subnet in subnets:
+                if subnet['ip_version'] == 6:
+                    subnet_id = subnet['id']
+                    ipv6_allocs_of_subnet = \
+                        port_obj.IPAllocation.\
+                            get_allocs_by_subnet_id(context,
+                                                    subnet_id,
+                                                    DEVICE_OWNER_ROUTER_AND_DHCP,
+                                                    True)
+                    for ipv6_alloc in ipv6_allocs_of_subnet:
+                        port_ipv6_addr_to_fip = l3_obj.FloatingIP(
+                            context,
+                            project_id=router.project_id,
+                            id=uuidutils.generate_uuid(),
+                            floating_ip_address=ipv6_alloc.ip_address,
+                            floating_network_id=ipv6_alloc.network_id,
+                            floating_port_id=ipv6_alloc.port_id,
+                            router_id=router.id,
+                            status=constants.FLOATINGIP_STATUS_ACTIVE,
+                        )
+                        port_ipv6_addr_to_fip.create()
 
         return self._make_router_interface_info(
             router.id, port['tenant_id'], port['id'], port['network_id'],
@@ -1118,19 +1129,18 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         with context.session.begin(subtransactions=True):
             context.session.refresh(router)
 
-        for subnet in subnets:
-            if subnet['ip_version'] == 6:
-                subnet_id = subnet['id']
-                fips_of_subnets = \
-                    [self._make_ipv6_port_floatingip_dict(fips_obj_of_subnets)
-                     for fips_obj_of_subnets in
-                     l3_obj.FloatingIP.get_ipv6_port_fip_by_subnet(context,
-                                                                   subnet_id)]
-                for fip in fips_of_subnets:
-                    floatingip_obj = self._get_floatingip(context, fip['id'])
-                    if floatingip_obj.router_id == router_id:
-                        floatingip_obj.router_id = None
-                        floatingip_obj.update()
+        if not router.enable_snat66:
+            for subnet in subnets:
+                if subnet['ip_version'] == 6:
+                    subnet_id = subnet['id']
+                    fips_of_subnets = \
+                        [self._make_ipv6_port_floatingip_dict(fips_obj_of_subnets)
+                         for fips_obj_of_subnets in
+                         l3_obj.FloatingIP.get_ipv6_port_fip_by_subnet(context,
+                                                                       subnet_id)]
+                    for fip in fips_of_subnets:
+                        floatingip_obj = self._get_floatingip(context, fip['id'])
+                        floatingip_obj.delete()
 
         return self._make_router_interface_info(router_id, port['tenant_id'],
                                                 port['id'], port['network_id'],
@@ -1587,7 +1597,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         resource_extend.apply_funcs(l3_apidef.FLOATINGIPS, floatingip_dict,
                                     floatingip_db)
 
-        # Determine if it is gateway ip, and manually notify l3-agent
+        # Determine if it is gw ip or ecs ip, and manually notify l3-agent
         if floatingip_dict['router_id'] and \
                 old_floatingip['fixed_ip_address'] is None and \
                 floatingip_dict['fixed_ip_address'] is None:
@@ -1639,6 +1649,17 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                                       l3_port_check=False)
         registry.notify(resources.FLOATING_IP, events.AFTER_DELETE,
                         self, **floatingip_dict)
+
+        # Determine if it is gw ip or ecs ip, and manually notify l3-agent
+        if floatingip_dict['router_id'] and \
+                floatingip_dict['fixed_ip_address'] is None:
+            router_id = floatingip_dict['router_id']
+            router_ids = list()
+            router_ids.append(router_id)
+            l3_rpc_notifier = l3_rpc_agent_api.L3AgentNotifyAPI()
+            l3_rpc_notifier.routers_updated(context,
+                                            router_ids, 'delete_floatingip')
+
         return floatingip_dict
 
     @db_api.retry_if_session_inactive()

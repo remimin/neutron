@@ -1337,11 +1337,20 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                 for port_fixed_ip in port_fixed_ips:
                     if netaddr.IPAddress(port_fixed_ip['ip_address']).version \
                             == constants.IP_VERSION_6:
-                        self._convert_port_ipv6_addr_to_fip(context,
-                                                            port_id,
-                                                            network_id,
-                                                            port_fixed_ip,
-                                                            p['tenant_id'])
+                        router_id = l3_obj.RouterPort.\
+                            get_router_id_by_subnet(context,
+                                                    port_fixed_ip['subnet_id'])
+                        if router_id is None:
+                            continue
+                        router = l3_obj.Router.get_router_by_id(context,
+                                                                router_id)
+                        if not router.enable_snat66:
+                            self._convert_port_ipv6_addr_to_fip(context,
+                                                                port_id,
+                                                                network_id,
+                                                                router_id,
+                                                                port_fixed_ip,
+                                                                p['tenant_id'])
         except Exception as e:
             msg = _("IPv6 address belonging to the port %s "
                     "failed to convert to floatingip, because %s") \
@@ -1351,12 +1360,9 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         return db_port
 
     def _convert_port_ipv6_addr_to_fip(self, context,
-                                       port_id, network_id,
+                                       port_id, network_id, router_id,
                                        port_fixed_ip, project_id):
         fip_address = port_fixed_ip['ip_address']
-        subnet_id = port_fixed_ip['subnet_id']
-        router_id = l3_obj.RouterPort.get_router_id_by_subnet(context,
-                                                              subnet_id)
         port_ipv6_addr_to_fip = l3_obj.FloatingIP(
             context,
             project_id=project_id,
@@ -1523,3 +1529,37 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                             device_id=device_id)
                 if tenant_id != router['tenant_id']:
                     raise n_exc.DeviceIDNotOwnedByTenant(device_id=device_id)
+
+    def is_privatefloating_enabled(self):
+        return cfg.CONF.privatefloating.enable_privatefloating
+    
+    def get_privatefloating_network(self, context=None):
+        if self.is_privatefloating_enabled():
+            try:
+                if not context:
+                    context = ctx.get_admin_context()
+                privatefloating_network_dict = \
+                    self.get_network(context, cfg.CONF.privatefloating.privatefloating_network)
+                privatefloating_network_dict['subnets_detail'] = \
+                    self.get_subnets(context, filters = {
+                                        'network_id':[cfg.CONF.privatefloating.privatefloating_network]
+                                        }) 
+                self.privatefloating_subnet_dict = {}
+                for subnet in privatefloating_network_dict['subnets_detail']:
+                    self.privatefloating_subnet_dict[subnet['id']] = self.privatefloating_subnet_dict
+                return privatefloating_network_dict
+            
+            except Exception as e:
+                LOG.warning("privatefloating network %s is not exists! ", 
+                           cfg.CONF.privatefloating.privatefloating_network)
+                return None
+        return None
+    
+    def get_privatefloating_arp_timeout(self):
+        return cfg.CONF.privatefloating.arp_timeout
+    
+    def get_privatefloating_subnets_dict(self):
+        if  self.is_privatefloating_enabled():
+            if len(self.privatefloating_subnet_dict) == 0:
+                self.get_privatefloating_network()
+        return self.privatefloating_subnet_dict

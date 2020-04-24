@@ -16,6 +16,7 @@ import netaddr
 
 from neutron_lib.api.definitions import availability_zone as az_def
 from neutron_lib.api.validators import availability_zone as az_validator
+from neutron_lib import constants as const
 from oslo_versionedobjects import fields as obj_fields
 import six
 from sqlalchemy import func
@@ -160,16 +161,13 @@ class RouterPort(base.NeutronDbObject):
     @classmethod
     def get_router_id_by_subnet(cls, context, subnet_id):
         query = context.session.query(l3.RouterPort.router_id)
-        query = query.join(models_v2.Port)
-        query = query.join(
-            models_v2.Subnet,
-            models_v2.Subnet.network_id == models_v2.Port.network_id)
-        query = query.filter(
-            models_v2.Subnet.id == subnet_id)
+        query = query.join(models_v2.IPAllocation,
+                           l3.RouterPort.port_id == models_v2.IPAllocation.port_id)
+        query = query.filter(models_v2.IPAllocation.subnet_id == subnet_id)
         if query.count() == 0:
             return None
-        query = query.distinct().all()
-        return query[0][0]
+        query = query.distinct().one()
+        return query[0]
 
 
 @base.NeutronObjectRegistry.register
@@ -242,6 +240,14 @@ class Router(base.NeutronDbObject):
             ~l3.Router.project_id.in_(projects))
 
         return bool(query.count())
+
+    @classmethod
+    def get_router_by_id(cls, context, router_id):
+        query = context.session.query(l3.Router)
+        query = query.filter(
+            l3.Router.id == router_id)
+        router_obj = query.distinct().one()
+        return cls._load_object(context, router_obj)
 
 
 @base.NeutronObjectRegistry.register
