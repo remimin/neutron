@@ -173,6 +173,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             lib_db_api.sqla_listen(
                 models_v2.Port.status, 'set',
                 self.nova_notifier.record_port_status_changed)
+        self.privatefloating_subnet_dict = {}
 
     @registry.receives(resources.RBAC_POLICY, [events.BEFORE_CREATE,
                                                events.BEFORE_UPDATE,
@@ -1489,15 +1490,20 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
     def is_privatefloating_enabled(self):
         return cfg.CONF.privatefloating.enable_privatefloating
     
-    def get_privatefloating_network(self, context):
+    def get_privatefloating_network(self, context=None):
         if self.is_privatefloating_enabled():
             try:
+                if not context:
+                    context = ctx.get_admin_context()
                 privatefloating_network_dict = \
                     self.get_network(context, cfg.CONF.privatefloating.privatefloating_network)
                 privatefloating_network_dict['subnets_detail'] = \
                     self.get_subnets(context, filters = {
                                         'network_id':[cfg.CONF.privatefloating.privatefloating_network]
                                         }) 
+                self.privatefloating_subnet_dict = {}
+                for subnet in privatefloating_network_dict['subnets_detail']:
+                    self.privatefloating_subnet_dict[subnet['id']] = self.privatefloating_subnet_dict
                 return privatefloating_network_dict
             
             except Exception as e:
@@ -1508,4 +1514,10 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
     
     def get_privatefloating_arp_timeout(self):
         return cfg.CONF.privatefloating.arp_timeout
+    
+    def get_privatefloating_subnets_dict(self):
+        if  self.is_privatefloating_enabled():
+            if len(self.privatefloating_subnet_dict) == 0:
+                self.get_privatefloating_network()
+        return self.privatefloating_subnet_dict
     
