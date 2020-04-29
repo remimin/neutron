@@ -203,6 +203,7 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
         addresses for the port. If port['fixed_ips'] contains an IP address or
         a subnet_id then allocate an IP address accordingly.
         """
+        plugin = directory.get_plugin()
         p = port['port']
         fixed_configured = p['fixed_ips'] is not constants.ATTR_NOT_SPECIFIED
         subnets = self._ipam_get_subnets(context,
@@ -213,6 +214,44 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
 
         v4, v6_stateful, v6_stateless = self._classify_subnets(
             context, subnets)
+
+        # Check if need allocate privatefloating ip
+        ignore_types = [
+            constants.DEVICE_OWNER_FLOATINGIP,
+            constants.DEVICE_OWNER_DHCP,
+            constants.DEVICE_OWNER_ROUTER_GW,
+            constants.DEVICE_OWNER_AGENT_GW,
+            constants.DEVICE_OWNER_ROUTER_HA_INTF,
+            constants.DEVICE_OWNER_FLOATINGIP,
+        ]
+        for owner_type in constants.ROUTER_INTERFACE_OWNERS_SNAT:
+            ignore_types.append(owner_type)
+
+        need_allocate_privatefloating = True
+        if p['device_owner'] in ignore_types:
+            need_allocate_privatefloating = False
+
+        # External network or network has tag noprivatefloating will not allocate privatefloating ip
+        if need_allocate_privatefloating:
+            network_detail = plugin.get_network(context,p['network_id'])
+            is_external_network = network_detail.get('router:external',False)
+            network_tags = network_detail.get('tags',[])
+            if is_external_network or network_tags.count('disableprivatefloating') > 0:
+                need_allocate_privatefloating = False
+
+        # Get privatefloating network info
+        privatefloating_network = plugin.get_privatefloating_network(context)
+            
+        # Remove fixed_ip with subnet_id in privatefloating network for normal network
+        if privatefloating_network and fixed_configured:
+            if privatefloating_network['id'] != p['network_id']:
+                privatesubnet_dict = {}
+                for s in privatefloating_network['subnets_detail']:
+                    privatesubnet_dict[s['id']] = s
+                for ip in p['fixed_ips']:
+                    if privatesubnet_dict.has_key(ip['subnet_id']):
+                        LOG.info("remove private subnet")
+                        p['fixed_ips'].remove(ip)
 
         if fixed_configured:
             ips = self._test_fixed_ips_for_port(context,
@@ -228,42 +267,14 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                     ips.append([{'subnet_id': s['id']}
                                 for s in subnets])
 
-        # For private floating handle
-        ignore_types = [
-            constants.DEVICE_OWNER_FLOATINGIP,
-            constants.DEVICE_OWNER_DHCP,
-            constants.DEVICE_OWNER_ROUTER_GW,
-            constants.DEVICE_OWNER_AGENT_GW,
-            constants.DEVICE_OWNER_ROUTER_HA_INTF,
-            constants.DEVICE_OWNER_FLOATINGIP,
-        ]
-        for owner_type in constants.ROUTER_INTERFACE_OWNERS_SNAT:
-            ignore_types.append(owner_type)
-        
-        
-        need_allocate_privatefloating = True
-        plugin = directory.get_plugin()
-        
-        if p['device_owner'] in ignore_types:
-            need_allocate_privatefloating = False
-        
-        #external network or network has tag noprivatefloating will not allocate privatefloating ip
-        if need_allocate_privatefloating:
-            network_detail = plugin.get_network(context,p['network_id'])
-            is_external_network = network_detail.get('router:external',False)
-            network_tags = network_detail.get('tags',[])
-            if is_external_network or network_tags.count('disableprivatefloating') > 0:
-                need_allocate_privatefloating = False
-		
+        # Allocate privatefloating ip if needed or not
         if need_allocate_privatefloating and plugin.is_privatefloating_enabled():
-            privatefloating_network = plugin.get_privatefloating_network(context)
-            
             if not privatefloating_network:
                 LOG.warning("Private floating network enabled, but network is not exit.")
             elif privatefloating_network['id'] != p['network_id']:
                 pfip_v4 = []
                 pfip_v6 = []
-                
+                    
                 for s in privatefloating_network['subnets_detail']:
                     if s['ip_version'] == 4:
                         if not len(pfip_v4):
