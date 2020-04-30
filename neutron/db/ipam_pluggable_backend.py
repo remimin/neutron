@@ -249,9 +249,10 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                 for s in privatefloating_network['subnets_detail']:
                     privatesubnet_dict[s['id']] = s
                 for ip in p['fixed_ips']:
-                    if privatesubnet_dict.has_key(ip['subnet_id']):
-                        LOG.info("remove private subnet")
-                        p['fixed_ips'].remove(ip)
+                    if ip.has_key('subnet_id'):
+                        if privatesubnet_dict.has_key(ip['subnet_id']):
+                            LOG.info("remove private subnet")
+                            p['fixed_ips'].remove(ip)
 
         if fixed_configured:
             ips = self._test_fixed_ips_for_port(context,
