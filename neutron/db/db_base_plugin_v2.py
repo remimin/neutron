@@ -1547,7 +1547,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                                         }) 
                 self.privatefloating_subnet_dict = {}
                 for subnet in privatefloating_network_dict['subnets_detail']:
-                    self.privatefloating_subnet_dict[subnet['id']] = self.privatefloating_subnet_dict
+                    self.privatefloating_subnet_dict[subnet['id']] = subnet
                 return privatefloating_network_dict
             
             except Exception as e:

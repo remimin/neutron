@@ -25,6 +25,7 @@ from neutron_lib.api import validators
 from neutron_lib import constants
 from neutron_lib.db import utils as db_utils
 from neutron_lib import exceptions as n_exc
+from neutron_lib.plugins import directory
 from neutron_lib.utils import net
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -203,7 +204,8 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
 
     def _make_port_dict(self, port, fields=None,
                         process_extensions=True):
-        privatefloating_subnet_dict = self.get_privatefloating_subnets_dict()
+        plugin = directory.get_plugin()
+        privatefloating_subnet_dict = plugin.get_privatefloating_subnets_dict()
         res = {"id": port["id"],
                'name': port['name'],
                "network_id": port["network_id"],
