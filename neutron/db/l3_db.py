@@ -409,8 +409,11 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 context.session.add(router)
                 router_port.create()
 
-                if router['enable_snat66']:
-                    for fixed_ip in gw_port['fixed_ips']:
+                for fixed_ip in gw_port['fixed_ips']:
+                    if (netaddr.IPNetwork(fixed_ip['ip_address']).version == 4
+                        and router.enable_snat) or \
+                        (netaddr.IPNetwork(fixed_ip['ip_address']).version == 6
+                        and router.enable_snat66):
                         gw_to_fip = l3_obj.FloatingIP(
                             context,
                             project_id=router['project_id'],
@@ -420,7 +423,6 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                             floating_port_id=gw_port['id'],
                             router_id=router.id,
                             status=constants.FLOATINGIP_STATUS_ACTIVE,
-                            # standard_attr_id='111'
                         )
                         gw_to_fip.create()
 
