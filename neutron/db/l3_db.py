@@ -1185,11 +1185,13 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
 
     def _port_ipv4_fixed_ips(self, port):
         return [ip for ip in port['fixed_ips']
-                if netaddr.IPAddress(ip['ip_address']).version == 4]
+                if ip.get('visible', True) is True
+                and netaddr.IPAddress(ip['ip_address']).version == 4]
 
     def _port_ipv6_fixed_ips(self, port):
         return [ip for ip in port['fixed_ips']
-                if netaddr.IPAddress(ip['ip_address']).version == 6]
+                if ip.get('visible', True) is True
+                and netaddr.IPAddress(ip['ip_address']).version == 6]
 
     def _internal_fip_v6_assoc_data(self, context, fip, tenant_id):
         """Retrieve internal port data for floating IP.
