@@ -223,9 +223,16 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
             constants.DEVICE_OWNER_AGENT_GW,
             constants.DEVICE_OWNER_ROUTER_HA_INTF,
             constants.DEVICE_OWNER_FLOATINGIP,
+            constants.DEVICE_OWNER_LOADBALANCER,
+            constants.DEVICE_OWNER_LOADBALANCERV2,
         ]
         for owner_type in constants.ROUTER_INTERFACE_OWNERS_SNAT:
             ignore_types.append(owner_type)
+
+        for owner_type in plugin.get_additional_ingnored_deviceowners():
+            ignore_types.append(owner_type)
+
+        LOG.debug("Allocate privatefloating ip ignore types: %s.", ignore_types)
 
         need_allocate_privatefloating = True
         if p['device_owner'] in ignore_types:

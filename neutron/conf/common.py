@@ -195,6 +195,8 @@ privatefloating_opts = [
                help=_("The network uuid to be used for privatefloating ")),
     cfg.IntOpt('arp_timeout', default=300,
                help=_("ARP responser flow exist time for aged, unit is seconds")),
+    cfg.ListOpt('additional_ingnored_deviceowners', default=[],
+                help=_("Additional deviceowners to be ignored when allocate private floating ip")),
 ]
 
 def register_privatefloating_opts(cfg=cfg.CONF):

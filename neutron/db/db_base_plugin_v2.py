@@ -1520,4 +1520,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             if len(self.privatefloating_subnet_dict) == 0:
                 self.get_privatefloating_network()
         return self.privatefloating_subnet_dict
+
+    def get_additional_ingnored_deviceowners(self):
+        return cfg.CONF.privatefloating.additional_ingnored_deviceowners;
     
