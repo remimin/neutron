@@ -214,6 +214,21 @@ class IPAllocation(base.NeutronDbObject):
         if alloc_db:
             return True
 
+    @classmethod
+    def get_allocs_by_subnet_id(cls, context, subnet_id, device_owner,
+                               exclude=True):
+        if exclude:
+            alloc_db = (context.session.query(models_v2.IPAllocation).
+                       filter_by(subnet_id=subnet_id).join(models_v2.Port).
+                       filter(~models_v2.Port.device_owner.
+                       in_(device_owner)).all())
+        else:
+            alloc_db = (context.session.query(models_v2.IPAllocation).
+                       filter_by(subnet_id=subnet_id).join(models_v2.Port).
+                       filter(models_v2.Port.device_owner.
+                       in_(device_owner)).all())
+        return [cls._load_object(context, db_obj) for db_obj in alloc_db]
+
 
 @base.NeutronObjectRegistry.register
 class PortDNS(base.NeutronDbObject):

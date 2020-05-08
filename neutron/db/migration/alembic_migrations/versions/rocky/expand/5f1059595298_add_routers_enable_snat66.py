@@ -1,3 +1,5 @@
+# Copyright 2020 OpenStack Foundation
+#
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
 #    a copy of the License at
@@ -9,22 +11,25 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+#
+
+from alembic import op
+import sqlalchemy as sa
 
 
-from oslo_config import cfg
+"""add routers enable snat66
 
-from neutron._i18n import _
+Revision ID: 5f1059595298
+Revises: 867d39095bf4
+Create Date: 2020-04-22 13:26:24.745678
 
+"""
 
-L3GWMODE_OPTS = [
-    cfg.BoolOpt('enable_snat_by_default', default=True,
-                help=_('Define the default value of enable_snat if not '
-                       'provided in external_gateway_info.')),
-    cfg.BoolOpt('enable_snat66_by_default', default=False,
-                help=_('Define the default value of enable_snat66 if not '
-                       'provided in external_gateway_info.'))
-]
+# revision identifiers, used by Alembic.
+revision = '5f1059595298'
+down_revision = '867d39095bf4'
 
 
-def register_db_l3_gwmode_opts(conf=cfg.CONF):
-    conf.register_opts(L3GWMODE_OPTS)
+def upgrade():
+    op.add_column('routers', sa.Column('enable_snat66', sa.Boolean(),
+                                   nullable=False, server_default=sa.sql.false()))

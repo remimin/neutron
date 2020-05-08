@@ -55,6 +55,7 @@ class RouterInfo(object):
         self.agent_conf = agent_conf
         self.ex_gw_port = None
         self._snat_enabled = None
+        self._snat66_enabled = None
         self.fip_map = {}
         self.internal_ports = []
         self.pd_subnets = {}
@@ -118,6 +119,8 @@ class RouterInfo(object):
             return
         # enable_snat by default if it wasn't specified by plugin
         self._snat_enabled = self._router.get('enable_snat', True)
+        # disable_snat66 by default if it wasn't specified by plugin
+        self._snat66_enabled = self._router.get('enable_snat66', False)
 
     def is_router_master(self):
         return True
@@ -177,6 +180,19 @@ class RouterInfo(object):
                  (floating_ip, fixed_ip)),
                 ('float-snat', to_source)]
 
+    def floating_v6_forward_rules(self, fip):
+        fixed_ip = fip['fixed_ip_address']
+        floating_ip = fip['floating_ip_address']
+        to_source = '-s %s/128 -j SNAT --to-source %s' \
+                    % (fixed_ip, floating_ip)
+        if self.iptables_manager.random_fully:
+            to_source += ' --random-fully'
+        return [('PREROUTING', '-d %s/128 -j DNAT --to-destination %s' %
+                 (floating_ip, fixed_ip)),
+                ('OUTPUT', '-d %s/128 -j DNAT --to-destination %s' %
+                 (floating_ip, fixed_ip)),
+                ('float-snat', to_source)]
+
     def floating_mangle_rules(self, floating_ip, fixed_ip, internal_mark):
         mark_traffic_to_floating_ip = (
             'floatingip', '-d %s/32 -j MARK --set-xmark %s' % (
@@ -225,16 +241,17 @@ class RouterInfo(object):
         for fip in floating_ips:
             # Rebuild iptables rules for the floating ip.
             fip_ip = fip['floating_ip_address']
+            if fip['fixed_ip_address'] is None:
+                continue
             addr = netaddr.IPAddress(fip_ip)
-            for chain, rule in self.floating_forward_rules(fip):
-                if addr.version == lib_constants.IP_VERSION_4:
+            if addr.version == lib_constants.IP_VERSION_4:
+                for chain, rule in self.floating_forward_rules(fip):
                     self.iptables_manager.ipv4['nat'].add_rule(chain, rule,
-                                                           tag='floating_ip')
-                else:
+                                                               tag='floating_ip')
+            else:
+                for chain, rule in self.floating_v6_forward_rules(fip):
                     self.iptables_manager.ipv6['nat'].add_rule(chain, rule,
-                                                           tag='floating_ip')
-
-
+                                                               tag='floating_ip')
         self.iptables_manager.apply()
 
     def _process_pd_iptables_rules(self, prefix, subnet_id):
@@ -292,6 +309,8 @@ class RouterInfo(object):
             addr = netaddr.IPAddress(fip_ip)
             # Send the floating ip traffic to the right address scope
             fixed_ip = fip['fixed_ip_address']
+            if fixed_ip is None:
+                continue
             fixed_scope = fip.get('fixed_ip_address_scope')
             internal_mark = self.get_address_scope_mark_mask(fixed_scope)
             mangle_rules = self.floating_mangle_rules(
@@ -371,6 +390,8 @@ class RouterInfo(object):
         floating_ips = self.get_floating_ips()
         # Loop once to ensure that floating ips are configured.
         for fip in floating_ips:
+            if fip['fixed_ip_address'] is None:
+                continue
             fip_ip = fip['floating_ip_address']
             ip_cidr = common_utils.ip_to_cidr(fip_ip)
             new_cidrs.add(ip_cidr)
@@ -938,7 +959,7 @@ class RouterInfo(object):
             for ip_addr in ex_gw_port['fixed_ips']:
                 ex_gw_ip = ip_addr['ip_address']
                 if netaddr.IPAddress(ex_gw_ip).version == 6:
-                    if self._snat_enabled:
+                    if self._snat66_enabled:
                         rules = self.external_gateway_nat_snat_rules(
                             ex_gw_ip, interface_name)
                         for rule in rules:
