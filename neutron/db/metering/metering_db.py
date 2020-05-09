@@ -200,7 +200,7 @@ class MeteringDbMixin(metering.MeteringPluginBase,
 
                 rules = self._get_metering_rules_dict(label)
 
-                data = {'id': label['id'], 'rules': rules}
+                data = {'id': label['id'],'mappingtitle':label.name, 'rules': rules}
                 router_dict[constants.METERING_LABEL_KEY].append(data)
 
                 routers_dict[router['id']] = router_dict

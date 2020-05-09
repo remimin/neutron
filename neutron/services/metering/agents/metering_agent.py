@@ -13,6 +13,8 @@
 # under the License.
 
 import sys
+import eventlet
+import time
 
 from neutron_lib.agent import topics
 from neutron_lib import constants
@@ -37,8 +39,23 @@ from neutron import manager
 from neutron import service as neutron_service
 from neutron.services.metering.drivers import utils as driverutils
 
+from pykafka import KafkaClient
+from neutron.services.metering.collection import collect_router
+from neutron.services.metering.collection import collect_vpc
+from neutron.services.metering.collection import collect_dhcp
+from neutron.services.metering.common import log_derorator
+import json
 
 LOG = logging.getLogger(__name__)
+
+ROUTER_COUNTER_LOG = '/var/log/neutron/metering/router_counter.log'
+FIP_COUNTER_LOG = '/var/log/neutron/metering/fip_counter.log'
+VPC_COUNTER_LOG = '/var/log/neutron/metering/vpc_counter.log'
+DHCPVM_COUNTER_LOG = '/var/log/neutron/metering/vm_counter.log'
+router_cnt_log = log_derorator.MonitorLogger(ROUTER_COUNTER_LOG)
+fip_cnt_log = log_derorator.MonitorLogger(FIP_COUNTER_LOG)
+vpc_cnt_log = log_derorator.MonitorLogger(VPC_COUNTER_LOG)
+dhcpvm_cnt_log = log_derorator.MonitorLogger(DHCPVM_COUNTER_LOG)
 
 
 class MeteringPluginRpc(object):
@@ -71,12 +88,29 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
         self.metering_loop = loopingcall.FixedIntervalLoopingCall(
             self._metering_loop
         )
+
+        self.monitor_router_counter_loop = loopingcall.FixedIntervalLoopingCall(
+            self.monitor_router_counter
+        )
+
+        self.monitor_vpc_counter_loop = loopingcall.FixedIntervalLoopingCall(
+            self.monitor_vpc_counter
+        )
+
         measure_interval = self.conf.measure_interval
         self.last_report = 0
+        self.router_last_report = 0
+        self.vpc_last_report = 0
         self.metering_loop.start(interval=measure_interval)
+        self.monitor_router_counter_loop.start(interval=measure_interval)
+        self.monitor_vpc_counter_loop.start(interval=measure_interval)
+
         self.host = host
+        self.initKafa = True
+        self.producer_dict = {}
 
         self.label_tenant_id = {}
+        self.label_id_mappingto_title = {}
         self.routers = {}
         self.metering_infos = {}
         super(MeteringAgent, self).__init__(host=host)
@@ -89,20 +123,120 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
         self.metering_driver = driverutils.load_metering_driver(self,
                                                                 self.conf)
 
+    def after_start(self):
+        eventlet.spawn_n(self.monitor_resource(context))
+
+    def monitor_resource(self, context):
+        if self.initKafa:
+            self.producer_dict = self.get_client_toKafka()
+            LOG.debug('-------producer:%s', self.producer_dict)
+            self.initKafa = False
+
+
+        dhcpvm_pool = eventlet.GreenPool(size=100)
+
+        #while True:
+            #time.sleep(30)
+            #vm dhcp vm info
+            #dhcpvm_pool.spawn_n(self.monitor_dhcpvm_counter, self.producer_dict)
+
+    def monitor_router_counter(self):
+        if self.initKafa:
+            self.producer_dict = self.get_client_toKafka()
+            LOG.debug('-------producer:%s', self.producer_dict)
+            self.initKafa = False
+
+        ts = timeutils.utcnow_ts()
+        delta = ts - self.router_last_report
+
+        report_interval = self.conf.report_interval
+        if delta >= report_interval:
+            router_inst = collect_router.MonitorRouter()
+            router_inst.monitor_resource_router(router_cnt_log, self.producer_dict)
+
+            self.router_last_report = ts
+        return
+
+
+    def monitor_vpc_counter(self):
+        if self.initKafa:
+            self.producer_dict = self.get_client_toKafka()
+            LOG.debug('-------producer:%s', self.producer_dict)
+            self.initKafa = False
+
+        ts = timeutils.utcnow_ts()
+        delta = ts - self.vpc_last_report
+
+        report_interval = self.conf.report_interval
+        if delta >= report_interval:
+            vpc_inst = collect_vpc.MonitorVPC()
+            vpc_inst.monitor_resource_vpc(vpc_cnt_log, self.producer_dict)
+
+            self.vpc_last_report = ts
+        return
+
+
+    def monitor_dhcpvm_counter(self, producer_dict):
+        dhcp_inst = collect_dhcp.MonitorDhcp()
+        dhcp_inst.monitor_resource_compute(dhcpvm_cnt_log, producer_dict)
+
+    def get_client_toKafka(self):
+        kafka_dict = {}
+
+        kafka_host = self.conf.get('kafka_host', None)  # "172.20.90.4:9092"
+        monitor_topic_router = self.conf.get('monitor_topic_router', None)  # "NeutronCounter"
+        monitor_topic_fip = self.conf.get('monitor_topic_fip', None)  # self.conf.get('monitor_topic_fip', None)
+        monitor_topic_vpc = self.conf.get('monitor_topic_vpc', None)  # self.conf.get('monitor_topic_vpc', None)
+        monitor_topic_vm_healthchk = self.conf.get('monitor_topic_vm_healthchk',
+                                                   None)  # self.conf.get('monitor_topic_vm_healthchk', None)
+        LOG.debug('kafaka_host=%s', kafka_host)
+
+        if kafka_host is None or \
+                monitor_topic_fip is None or \
+                monitor_topic_vpc is None or \
+                monitor_topic_vm_healthchk is None:
+            LOG.error('Can not get kafka_host or topic from configure failed')
+            return {}
+
+        client = KafkaClient(hosts=kafka_host)
+        monitor_topic_router = client.topics[monitor_topic_router]
+        producer_router = monitor_topic_router.get_producer(sync=True)
+        kafka_dict['producer_router'] = producer_router
+
+        monitor_topic_fip = client.topics[monitor_topic_fip]
+        producer_fip = monitor_topic_fip.get_producer(sync=True)
+        kafka_dict['producer_fip'] = producer_fip
+
+        monitor_topic_vpc = client.topics[monitor_topic_vpc]
+        producer_vpc = monitor_topic_vpc.get_producer(sync=True)
+        kafka_dict['producer_vpc'] = producer_vpc
+
+        monitor_topic_vm_healthchk = client.topics[monitor_topic_vm_healthchk]
+        producer_vm_healthchk = monitor_topic_vm_healthchk.get_producer(sync=True)
+        kafka_dict['producer_vm_healthchk'] = producer_vm_healthchk
+
+        return kafka_dict
+
     def _metering_notification(self):
         for label_id, info in self.metering_infos.items():
             data = {'label_id': label_id,
                     'tenant_id': self.label_tenant_id.get(label_id),
+                    'title': self.label_id_mappingto_title[label_id],
                     'pkts': info['pkts'],
                     'bytes': info['bytes'],
                     'time': info['time'],
                     'first_update': info['first_update'],
                     'last_update': info['last_update'],
+                    'timestamp': info['last_update'],
                     'host': self.host}
 
             LOG.debug("Send metering report: %s", data)
-            notifier = n_rpc.get_notifier('metering')
-            notifier.info(self.context, 'l3.meter', data)
+            fip_str = json.dumps(data, ensure_ascii=False, indent=1)
+            self.producer_dict['producer_fip'].produce(bytes(fip_str))
+            fip_cnt_log.logger.info(fip_str)
+
+            # notifier = n_rpc.get_notifier('metering')
+            # notifier.info(self.context, 'l3.meter', data)
             info['pkts'] = 0
             info['bytes'] = 0
             info['time'] = 0
@@ -134,14 +268,16 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
 
     def _add_metering_infos(self):
         self.label_tenant_id = {}
+        self.label_id_mappingto_title = {}
         for router in self.routers.values():
             tenant_id = router['tenant_id']
             labels = router.get(n_const.METERING_LABEL_KEY, [])
             for label in labels:
                 label_id = label['id']
                 self.label_tenant_id[label_id] = tenant_id
-
+                self.label_id_mappingto_title[label_id] = label['mappingtitle']
         accs = self._get_traffic_counters(self.context, self.routers.values())
+        LOG.debug('accs=%s', accs)
         if not accs:
             return
 
@@ -149,6 +285,10 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
             self._add_metering_info(label_id, acc['pkts'], acc['bytes'])
 
     def _metering_loop(self):
+        if self.initKafa:
+            self.producer_dict = self.get_client_toKafka()
+            self.initKafa = False
+
         self._sync_router_namespaces(self.context, self.routers.values())
         self._add_metering_infos()
 
