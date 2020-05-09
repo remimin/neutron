@@ -1,4 +1,5 @@
 import logging
+import os
 from logging import handlers
 
 
@@ -13,6 +14,9 @@ class MonitorLogger(object):
 
     def __init__(self, file_name, level='info', when='H', backCount=5,
                  fmt='%(asctime)s - %(levelname)s: %(message)s'):
+        file_exits = os.path.exists(file_name)
+        if not file_exits:
+            os.makedirs(file_name)
         self.logger = logging.getLogger(file_name)
         format_str = logging.Formatter(fmt)
         self.logger.setLevel(self.level_relations.get(level))
