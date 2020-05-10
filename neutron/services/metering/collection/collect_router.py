@@ -99,7 +99,7 @@ class MonitorRouter(object):
             now_time2 = datetime.datetime.now()
 
             if len(ret_list) == 0:
-                LOG.warrning("collecting router but not found any router...")
+                LOG.warning("collecting router but not found any router...")
                 return
             else:
                 LOG.info('\n eslaped:%s ret_list=%s ', now_time2 - now_time1, ret_list)
@@ -135,7 +135,7 @@ class MonitorRouter(object):
                     router_counter_local.append(router_dict_local)
 
                 else:
-                    LOG.warrning('Invalid router namespace, remove it:%s', ns)
+                    LOG.warning('Invalid router namespace, remove it:%s', ns)
             LOG.debug('-----exit collect router-----')
         except Exception as e:
             LOG.error('analying router namespace failed...%(router_ns)s reason %(except)s', {'router_ns':router_ns,'except':e})

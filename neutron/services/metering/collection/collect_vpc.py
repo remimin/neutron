@@ -71,7 +71,7 @@ class MonitorVPC(object):
 
             now_time2 = datetime.datetime.now()
             if len(ret_list) == 0:
-                LOG.warrning('collecting VPC but not found any router namespace...')
+                LOG.warning('collecting VPC but not found any router namespace...')
                 return
             else:
                 LOG.info('\n eslaped:%s ret_list=%s ', now_time2 - now_time1, ret_list)

@@ -48,10 +48,12 @@ import json
 
 LOG = logging.getLogger(__name__)
 
-ROUTER_COUNTER_LOG = '/var/log/neutron/metering/router_counter.log'
-FIP_COUNTER_LOG = '/var/log/neutron/metering/fip_counter.log'
-VPC_COUNTER_LOG = '/var/log/neutron/metering/vpc_counter.log'
-DHCPVM_COUNTER_LOG = '/var/log/neutron/metering/vm_counter.log'
+
+ROUTER_COUNTER_LOG= 'router_counter.log'
+FIP_COUNTER_LOG= 'fip_counter.log'
+VPC_COUNTER_LOG= 'vpc_counter.log'
+DHCPVM_COUNTER_LOG= 'vm_counter.log'
+
 router_cnt_log = log_derorator.MonitorLogger(ROUTER_COUNTER_LOG)
 fip_cnt_log = log_derorator.MonitorLogger(FIP_COUNTER_LOG)
 vpc_cnt_log = log_derorator.MonitorLogger(VPC_COUNTER_LOG)
@@ -131,7 +133,6 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
             self.producer_dict = self.get_client_toKafka()
             LOG.debug('-------producer:%s', self.producer_dict)
             self.initKafa = False
-
 
         dhcpvm_pool = eventlet.GreenPool(size=100)
 

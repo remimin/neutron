@@ -1,6 +1,7 @@
 import logging
 import os
 from logging import handlers
+from neutron.services.metering.common import constants as meter_const
 
 
 class MonitorLogger(object):
@@ -14,9 +15,11 @@ class MonitorLogger(object):
 
     def __init__(self, file_name, level='info', when='H', backCount=5,
                  fmt='%(asctime)s - %(levelname)s: %(message)s'):
-        file_exits = os.path.exists(file_name)
+        file_exits = os.path.exists(meter_const.METERING_LOG_DIR)
         if not file_exits:
-            os.makedirs(file_name)
+            os.makedirs(meter_const.METERING_LOG_DIR)
+
+        file_name = '{0}/{1}'.format(meter_const.METERING_LOG_DIR,file_name)
         self.logger = logging.getLogger(file_name)
         format_str = logging.Formatter(fmt)
         self.logger.setLevel(self.level_relations.get(level))
