@@ -89,7 +89,7 @@ class MonitorRouter(object):
 
     def monitor_resource_router(self, router_cnt_log, topic_producer_dict):
         LOG.debug('-----Entry collect router-----')
-        router_last_report=123
+        router_last_report = 123
         router_ns = set()
         router_counter = []
         router_counter_local = []
@@ -140,10 +140,11 @@ class MonitorRouter(object):
                     LOG.warning('Invalid router namespace, remove it:%s', ns)
             LOG.debug('-----exit collect router-----')
         except Exception as e:
-            LOG.error('analying router namespace failed...%(router_ns)s reason %(except)s', {'router_ns':router_ns,'except':e})
+            LOG.error('analying router namespace failed...%(router_ns)s reason %(except)s',
+                      {'router_ns': router_ns, 'except': e})
             return
 
-        #write logfile
+        # write logfile
         try:
             router_str_local = json.dumps(router_counter_local, ensure_ascii=False, indent=1)
             router_cnt_log.logger.info(router_str_local)
@@ -151,7 +152,7 @@ class MonitorRouter(object):
         except Exception as e:
             LOG.error('writing router counter logfile failed...')
 
-        #to kafka
+        # to kafka
         router_str = ''
         try:
             router_str = json.dumps(router_counter, ensure_ascii=False, indent=1)
@@ -165,8 +166,6 @@ class MonitorRouter(object):
             topic_producer_dict['producer_router'].start()
             topic_producer_dict['producer_router'].produce(router_str)
 
-
-
     def get_router_connections(self, ns_id):
         cmd = '/usr/sbin/ip netns exec ' + ns_id + \
               ' cat /proc/net/nf_conntrack | wc -l'
@@ -174,6 +173,6 @@ class MonitorRouter(object):
             ret_list = self.monitorutils.monitor_util_cmd_execute_list(cmd)
             x = ret_list[0] if len(ret_list) >= 1 else 0
         except Exception as e:
-            LOG.error('reporting router connections failed...reason %(except)s', {'except':e})
+            LOG.error('reporting router connections failed...reason %(except)s', {'except': e})
             return 0
         return int(x)

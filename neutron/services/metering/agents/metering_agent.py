@@ -40,7 +40,7 @@ from neutron import manager
 from neutron import service as neutron_service
 from neutron.services.metering.drivers import utils as driverutils
 
-#import pykafka
+# import pykafka
 from pykafka import KafkaClient
 from pykafka import exceptions as kafka_exc
 
@@ -53,11 +53,10 @@ import json
 
 LOG = logging.getLogger(__name__)
 
-
-ROUTER_COUNTER_LOG= 'router_counter.log'
-FIP_COUNTER_LOG= 'fip_counter.log'
-VPC_COUNTER_LOG= 'vpc_counter.log'
-DHCPVM_COUNTER_LOG= 'vm_counter.log'
+ROUTER_COUNTER_LOG = 'router_counter.log'
+FIP_COUNTER_LOG = 'fip_counter.log'
+VPC_COUNTER_LOG = 'vpc_counter.log'
+DHCPVM_COUNTER_LOG = 'vm_counter.log'
 
 router_cnt_log = log_derorator.MonitorLogger(ROUTER_COUNTER_LOG)
 fip_cnt_log = log_derorator.MonitorLogger(FIP_COUNTER_LOG)
@@ -133,21 +132,20 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
     def after_start(self):
         eventlet.spawn_n(self.monitor_resource(context))
 
-
     def _get_client_toKafka(self):
-        kafka_dict = {'initSucc':True,
-                      'client':''}
+        kafka_dict = {'initSucc': True,
+                      'client': ''}
 
-        try :
+        try:
 
             kafka_host = self.conf.get('kafka_host', None)  # "172.20.90.4:9092"
-            monitor_topic_router = self.conf.get('monitor_topic_router', None)  # "NeutronCounter"
-            monitor_topic_fip = self.conf.get('monitor_topic_fip', None)  # self.conf.get('monitor_topic_fip', None)
-            monitor_topic_vpc = self.conf.get('monitor_topic_vpc', None)  # self.conf.get('monitor_topic_vpc', None)
+            monitor_topic_router = self.conf.get('monitor_topic_router', None)
+            monitor_topic_fip = self.conf.get('monitor_topic_fip', None)
+            monitor_topic_vpc = self.conf.get('monitor_topic_vpc', None)
             monitor_topic_vm_healthchk = self.conf.get('monitor_topic_vm_healthchk',
-                                                       None)  # self.conf.get('monitor_topic_vm_healthchk', None)
+                                                       None)
 
-            LOG.debug('kafaka_host=%s', kafka_host)
+            LOG.debug('\n init kafaka_host=%s', kafka_host)
 
             if kafka_host is None or \
                     monitor_topic_fip is None or \
@@ -175,7 +173,7 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
             producer_vm_healthchk = monitor_topic_vm_healthchk.get_producer(sync=True)
             kafka_dict['producer_vm_healthchk'] = producer_vm_healthchk
 
-            kafka_dict['client'] =client
+            kafka_dict['client'] = client
 
         except kafka_exc.NoBrokersAvailableError as e:
             LOG.warning('The remote kafaka server connect failed.')
@@ -192,6 +190,8 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
             LOG.debug('topic_producer_dict:%s', self.topic_producer_dict)
             if self.topic_producer_dict['initSucc']:
                 self.initKafa = False
+            else:
+                return
 
         ts = timeutils.utcnow_ts()
         delta = ts - self.router_last_report
@@ -199,11 +199,15 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
         report_interval = self.conf.report_interval
         if delta >= report_interval:
             router_inst = collect_router.MonitorRouter()
-            router_inst.monitor_resource_router(router_cnt_log, self.topic_producer_dict)
+            try:
+                router_inst.monitor_resource_router(router_cnt_log, self.topic_producer_dict)
+            except kafka_exc.NoBrokersAvailableError as e:
+                LOG.warning('----Reinit Kafka client in router---')
+                self.initKafa = True
 
             self.router_last_report = ts
-        return
 
+        return
 
     def monitor_vpc_counter(self):
         if self.initKafa:
@@ -211,6 +215,8 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
             LOG.debug('topic_producer_dict:%s', self.topic_producer_dict)
             if self.topic_producer_dict['initSucc']:
                 self.initKafa = False
+            else:
+                return
 
         ts = timeutils.utcnow_ts()
         delta = ts - self.vpc_last_report
@@ -218,9 +224,14 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
         report_interval = self.conf.report_interval
         if delta >= report_interval:
             vpc_inst = collect_vpc.MonitorVPC()
-            vpc_inst.monitor_resource_vpc(vpc_cnt_log, self.topic_producer_dict)
+            try:
+                vpc_inst.monitor_resource_vpc(vpc_cnt_log, self.topic_producer_dict)
+            except kafka_exc.NoBrokersAvailableError as e:
+                LOG.warning('----Reinit Kafka client in vpc---')
+                self.initKafa = True
 
             self.vpc_last_report = ts
+
         return
 
     def _metering_notification(self):
@@ -237,9 +248,21 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
                     'host': self.host}
 
             LOG.debug("===Send metering report=== \n %s", data)
-            fip_str = json.dumps(data, ensure_ascii=False, indent=1)
-            self.topic_producer_dict['producer_fip'].produce(bytes(fip_str))
-            fip_cnt_log.logger.info(fip_str)
+
+            try:
+                fip_str = json.dumps(data, ensure_ascii=False, indent=1)
+                self.topic_producer_dict['producer_fip'].produce(bytes(fip_str))
+                fip_cnt_log.logger.info(fip_str)
+
+            except kafka_exc.SocketDisconnectedError as e:
+                LOG.warning("Kafka fip connection has lost, reconnect and resending...")
+                self.topic_producer_dict['producer_fip'] = self.topic_producer_dict['topic_fip'].get_producer(sync=True)
+                self.topic_producer_dict['producer_fip'].stop()
+                self.topic_producer_dict['producer_fip'].start()
+                self.topic_producer_dict['producer_fip'].produce(bytes(fip_str))
+            except kafka_exc.NoBrokersAvailableError as e:
+                LOG.warning('----Reinit Kafka client in fip---')
+                self.initKafa = True
 
             # notifier = n_rpc.get_notifier('metering')
             # notifier.info(self.context, 'l3.meter', data)
@@ -290,15 +313,14 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
         for label_id, acc in accs.items():
             self._add_metering_info(label_id, acc['pkts'], acc['bytes'])
 
-
-
     def _metering_loop(self):
         if self.initKafa:
             self.topic_producer_dict = self._get_client_toKafka()
             LOG.debug('topic_producer_dict:%s', self.topic_producer_dict)
             if self.topic_producer_dict['initSucc']:
                 self.initKafa = False
-
+            else:
+                return
 
         self._sync_router_namespaces(self.context, self.routers.values())
         self._add_metering_infos()
@@ -410,7 +432,7 @@ class MeteringAgentWithStateReport(MeteringAgent):
             'configurations': {
                 'metering_driver': self.conf.driver,
                 'measure_interval':
-                self.conf.measure_interval,
+                    self.conf.measure_interval,
                 'report_interval': self.conf.report_interval
             },
             'start_flag': True,

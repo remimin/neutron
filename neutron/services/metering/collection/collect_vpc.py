@@ -84,7 +84,7 @@ class MonitorVPC(object):
                     ns_uuid = ns[(meter_const.ROUTER_LABLE_LEN + 1):]
                     router_ns.add(ns)
 
-                    #LOG.debug('-------router namespace:%s', ns)
+                    # LOG.debug('-------router namespace:%s', ns)
                     ip_wrapper = ip_lib.IPWrapper(namespace=ns)
                     ip_devs = ip_wrapper.get_devices()
                     devs = {}
@@ -92,31 +92,31 @@ class MonitorVPC(object):
                     total_inter_bytes = 0
                     total_ext_pkgs = 0
                     total_ext_bytes = 0
-                    #LOG.debug('-------------ip_devs:%s', ip_devs)
+                    # LOG.debug('-------------ip_devs:%s', ip_devs)
                     for ip_dev in ip_devs:
                         if ip_dev.name.startswith('qr') or ip_dev.name.startswith('qg'):
                             data = {'inter_pkts': 0, 'inter_bytes': 0, 'ext_pkts': 0, 'ext_bytes': 0}
                             ifcmd = ['ifconfig', ip_dev.name]
                             output = ip_wrapper.netns.execute(ifcmd, run_as_root=True, check_exit_code=False)
-                            #LOG.debug('-------------output:%s', output)
+                            # LOG.debug('-------------output:%s', output)
                             for l in output.split('\n'):
                                 l = l.strip()
-                                #LOG.debug('-------------line:%s', l)
+                                # LOG.debug('-------------line:%s', l)
                                 if l.startswith('RX packets'):
                                     parts = l.split(' ')
-                                    #LOG.debug('-------------parts:%s', parts)
+                                    # LOG.debug('-------------parts:%s', parts)
                                     data['inter_pkts'] = int(parts[2])
                                     data['inter_bytes'] = int(parts[5])
                                     total_inpkt += data['inter_pkts']
                                     total_inter_bytes += data['inter_bytes']
                                 elif l.startswith('TX packets'):
                                     parts = l.split(' ')
-                                    #LOG.debug('-------------parts:%s', parts)
+                                    # LOG.debug('-------------parts:%s', parts)
                                     data['ext_pkts'] = int(parts[2])
                                     data['ext_bytes'] = int(parts[5])
                                     total_ext_pkgs += data['ext_pkts']
                                     total_ext_bytes += data['ext_bytes']
-                            #LOG.debug('devname=%s inpkt=%s inbyte=%s outpkt=%s outbyte=%s', ip_dev.name, total_inpkt, total_inter_bytes, total_ext_pkgs,total_ext_bytes )
+                            # LOG.debug('devname=%s inpkt=%s inbyte=%s outpkt=%s outbyte=%s', ip_dev.name, total_inpkt, total_inter_bytes, total_ext_pkgs,total_ext_bytes )
                             devs[ip_dev.name] = data
                     devs['total_inter_pkts'] = total_inpkt
                     devs['total_inter_bytes'] = total_inter_bytes
@@ -128,17 +128,17 @@ class MonitorVPC(object):
 
             LOG.debug('-----Exit collect VPC-----')
         except Exception as e:
-            LOG.error('analying VPC namespace failed...%(router_ns)s reason %(except)s', {'router_ns':router_ns,'except':e})
+            LOG.error('analying VPC namespace failed...%(router_ns)s reason %(except)s',
+                      {'router_ns': router_ns, 'except': e})
             return
 
-        vpc_str=''
+        vpc_str = ''
         try:
             vpc_str = json.dumps(vpc_counter, ensure_ascii=False, indent=1)
             log_handle.logger.info(vpc_str)
 
         except Exception as e:
             LOG.error('writing VPC counter logfile failed...')
-
 
         try:
             LOG.debug('===vpc_str to kafka===:%s', vpc_str)

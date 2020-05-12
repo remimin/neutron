@@ -35,7 +35,7 @@ class MonitorDhcp(object):
                         for line in optfile.readlines():
                             if "option:classless-static-route" in line:
                                 line = line.split(',')
-                                #LOG.info('-------line %s', line)
+                                # LOG.info('-------line %s', line)
                                 source_ip = line[line.index('169.254.169.254/32') + 1]
                                 dhcp_data.append({'timestamp': time.time(),
                                                   'source_ip': source_ip,
@@ -58,7 +58,7 @@ class MonitorDhcp(object):
 
         try:
             dhcp_str = json.dumps(dhcp_datas, ensure_ascii=False, indent=1)
-            #LOG.info('=====dhcp_str %s', dhcp_str)
+            # LOG.info('=====dhcp_str %s', dhcp_str)
             producer_dict['monitor_topic_vm_healthchk'].produce(dhcp_str)
             monitor_log.logger.info('dhcp_compute %s', dhcp_str)
         except Exception as e:
