@@ -236,7 +236,7 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
                     'timestamp': info['last_update'],
                     'host': self.host}
 
-            LOG.debug("Send metering report: %s", data)
+            LOG.debug("===Send metering report=== \n %s", data)
             fip_str = json.dumps(data, ensure_ascii=False, indent=1)
             self.topic_producer_dict['producer_fip'].produce(bytes(fip_str))
             fip_cnt_log.logger.info(fip_str)
