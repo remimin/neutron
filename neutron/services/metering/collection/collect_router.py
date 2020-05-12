@@ -154,9 +154,9 @@ class MonitorRouter(object):
         #to kafka
         router_str = ''
         try:
-            LOG.debug('===router_str to kafka===:%s', router_str)
             router_str = json.dumps(router_counter, ensure_ascii=False, indent=1)
             topic_producer_dict['producer_router'].produce(router_str)
+            LOG.debug('===router_str to kafka===:%s', router_str)
 
         except (kafka_exc.SocketDisconnectedError, kafka_exc.LeaderNotAvailable) as e:
             LOG.warning("Kafka connection has lost, reconnect and resending...")
