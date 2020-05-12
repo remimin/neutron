@@ -123,7 +123,7 @@ class MonitorVPC(object):
                     devs['total_ext_pkts'] = total_ext_pkgs
                     devs['total_ext_bytes'] = total_ext_bytes
                     devs['timestamp'] = time.time()
-                    devs['uuid'] = ns
+                    devs['uuid'] = ns_uuid
                     vpc_counter.append(devs)
 
             LOG.debug('-----Exit collect VPC-----')
@@ -138,7 +138,7 @@ class MonitorVPC(object):
 
         except Exception as e:
             LOG.error('writing VPC counter logfile failed...')
-            return
+
 
         try:
             LOG.debug('===vpc_str to kafka===:%s', vpc_str)
