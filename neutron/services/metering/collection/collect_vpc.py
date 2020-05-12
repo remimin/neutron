@@ -25,6 +25,7 @@ from neutron.agent.linux import ip_lib
 from neutron.services.metering.common import constants as meter_const
 from neutron.services.metering.common import utils as meter_utils
 from oslo_utils import timeutils
+from pykafka import exceptions as kafka_exc
 
 import datetime
 
@@ -60,7 +61,7 @@ class MonitorVPC(object):
     def get_linux_time(self):
         return time.time()
 
-    def monitor_resource_vpc(self, log_handle, producer_dict):
+    def monitor_resource_vpc(self, log_handle, topic_producer_dict):
         LOG.debug('-----Entry collect VPC-----')
         router_ns = set()
         vpc_counter = []
@@ -130,13 +131,22 @@ class MonitorVPC(object):
             LOG.error('analying VPC namespace failed...%(router_ns)s reason %(except)s', {'router_ns':router_ns,'except':e})
             return
 
+        vpc_str=''
         try:
             vpc_str = json.dumps(vpc_counter, ensure_ascii=False, indent=1)
-            producer_dict['producer_vpc'].produce(bytes(vpc_str))
-            LOG.info('===VPC string to kafka===%s', vpc_str)
-
             log_handle.logger.info(vpc_str)
 
         except Exception as e:
-            LOG.error('reporting VPC counter failed...reason %(except)s', {'except':e})
+            LOG.error('writing VPC counter logfile failed...')
             return
+
+        try:
+            LOG.debug('===vpc_str to kafka===:%s', vpc_str)
+            topic_producer_dict['producer_vpc'].produce(bytes(vpc_str))
+
+        except (kafka_exc.SocketDisconnectedError, kafka_exc.LeaderNotAvailable) as e:
+            LOG.warning("Kafka connection has lost, reconnect and resending...")
+            topic_producer_dict['producer_vpc'] = topic_producer_dict['topic_vpc'].get_producer(sync=True)
+            topic_producer_dict['producer_vpc'].stop()
+            topic_producer_dict['producer_vpc'].start()
+            topic_producer_dict['producer_vpc'].produce(bytes(vpc_str))

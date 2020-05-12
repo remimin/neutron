@@ -22,11 +22,13 @@ import six
 
 from neutron.services.metering.common import constants as meter_const
 from neutron.services.metering.common import utils as monitor_utils
+from neutron.services.metering.common import exceptions as meter_exception
 
 from neutron.agent.linux import ip_lib
 from neutron_lib.utils import helpers
 from neutron.agent.linux import utils as neutron_utils
 from oslo_utils import timeutils
+from pykafka import exceptions as kafka_exc
 import datetime
 
 LOG = logging.getLogger(__name__)
@@ -85,7 +87,7 @@ class MonitorRouter(object):
     def get_linux_time(self):
         return time.time()
 
-    def monitor_resource_router(self, router_cnt_log, producer_dict):
+    def monitor_resource_router(self, router_cnt_log, topic_producer_dict):
         LOG.debug('-----Entry collect router-----')
         router_last_report=123
         router_ns = set()
@@ -141,17 +143,29 @@ class MonitorRouter(object):
             LOG.error('analying router namespace failed...%(router_ns)s reason %(except)s', {'router_ns':router_ns,'except':e})
             return
 
+        #write logfile
         try:
-            router_str = json.dumps(router_counter, ensure_ascii=False, indent=1)
-            LOG.debug('===router_str to kafka===:%s', router_str)
-            producer_dict['producer_router'].produce(router_str)
-
             router_str_local = json.dumps(router_counter_local, ensure_ascii=False, indent=1)
             router_cnt_log.logger.info(router_str_local)
 
         except Exception as e:
-            LOG.error('reporting router counter failed...')
-            return
+            LOG.error('writing router counter logfile failed...')
+
+        #to kafka
+        router_str = ''
+        try:
+            LOG.debug('===router_str to kafka===:%s', router_str)
+            router_str = json.dumps(router_counter, ensure_ascii=False, indent=1)
+            topic_producer_dict['producer_router'].produce(router_str)
+
+        except (kafka_exc.SocketDisconnectedError, kafka_exc.LeaderNotAvailable) as e:
+            LOG.warning("Kafka connection has lost, reconnect and resending...")
+            topic_producer_dict['producer_router'] = topic_producer_dict['topic_router'].get_producer(sync=True)
+            topic_producer_dict['producer_router'].stop()
+            topic_producer_dict['producer_router'].start()
+            topic_producer_dict['producer_router'].produce(router_str)
+
+
 
     def get_router_connections(self, ns_id):
         cmd = '/usr/sbin/ip netns exec ' + ns_id + \
