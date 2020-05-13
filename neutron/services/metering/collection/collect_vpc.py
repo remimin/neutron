@@ -150,3 +150,4 @@ class MonitorVPC(object):
             topic_producer_dict['producer_vpc'].stop()
             topic_producer_dict['producer_vpc'].start()
             topic_producer_dict['producer_vpc'].produce(bytes(vpc_str))
+

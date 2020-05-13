@@ -238,7 +238,7 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
         for label_id, info in self.metering_infos.items():
             data = {'label_id': label_id,
                     'tenant_id': self.label_tenant_id.get(label_id),
-                    'title': self.label_id_mappingto_title[label_id],
+                    'title': self.label_id_mappingto_title.get(label_id),
                     'pkts': info['pkts'],
                     'bytes': info['bytes'],
                     'time': info['time'],
