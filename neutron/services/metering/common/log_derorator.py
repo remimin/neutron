@@ -13,7 +13,7 @@ class MonitorLogger(object):
         'crit': logging.CRITICAL
     }
 
-    def __init__(self, file_name, level='info', when='H', backCount=5,
+    def __init__(self, file_name, level='info', when='D', backCount=5,
                  fmt='%(asctime)s - %(levelname)s: %(message)s'):
         file_exits = os.path.exists(meter_const.METERING_LOG_DIR)
         if not file_exits:
