@@ -790,6 +790,50 @@ class IptablesManager(object):
 
         return acc
 
+    def get_up_down_traffic_counters(self, chain, wrap=True, zero=False):
+        """Return the sum of the traffic counters of all rules of a chain."""
+        cmd_tables = self._get_traffic_counters_cmd_tables(chain, wrap)
+        if not cmd_tables:
+            LOG.warning('Attempted to get up and down traffic counters of chain %s '
+                        'which does not exist', chain)
+            return
+
+        name = get_chain_name(chain, wrap)
+        acc = {'ingress_pkts': 0, 'ingress_bytes': 0,'egress_pkts': 0, 'egress_bytes': 0}
+
+        for cmd, table in cmd_tables:
+            args = [cmd, '-t', table, '-L', name, '-n', '-v', '-x',
+                    '-w', self.xlock_wait_time]
+            if zero:
+                args.append('-Z')
+            if self.namespace:
+                args = ['ip', 'netns', 'exec', self.namespace] + args
+            current_table = self.execute(args, run_as_root=True)
+            current_lines = current_table.split('\n')
+
+            i = 0
+            for line in current_lines[2:]:
+                if not line:
+                    break
+                i += 1
+                #now collect ingress and egress only
+                if i > 2:
+                    break
+                data = line.split()
+                if (len(data) < 7 or
+                        not data[0].isdigit() or
+                        not data[1].isdigit()):
+                    break
+                if data[5].startswith('qg'):
+                    acc['ingress_pkts'] += int(data[0])
+                    acc['ingress_bytes'] += int(data[1])
+
+                elif data[6].startswith('qg'):
+                    acc['egress_pkts'] += int(data[0])
+                    acc['egress_bytes'] += int(data[1])
+
+
+        return acc
 
 def _generate_path_between_rules(old_rules, new_rules):
     """Generates iptables commands to get from old_rules to new_rules.

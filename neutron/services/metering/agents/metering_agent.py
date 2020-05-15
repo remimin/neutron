@@ -239,8 +239,10 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
             data = {'label_id': label_id,
                     'tenant_id': self.label_tenant_id.get(label_id),
                     'title': self.label_id_mappingto_title.get(label_id),
-                    'pkts': info['pkts'],
-                    'bytes': info['bytes'],
+                    'external_in_pkts': info['ingress_pkts'],
+                    'external_in_traffic': info['ingress_bytes'],
+                    'external_out_pkts': info['egress_pkts'],
+                    'external_out_traffic': info['egress_bytes'],
                     'time': info['time'],
                     'first_update': info['first_update'],
                     'last_update': info['last_update'],
@@ -279,15 +281,19 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
         for label_id in label_ids:
             del self.metering_infos[label_id]
 
-    def _add_metering_info(self, label_id, pkts, bytes):
+    def _add_metering_info(self, label_id, ingress_pkts, ingress_bytes,egress_pkts,egress_bytes):
         ts = timeutils.utcnow_ts()
-        info = self.metering_infos.get(label_id, {'bytes': 0,
-                                                  'pkts': 0,
+        info = self.metering_infos.get(label_id, {'ingress_pkts': 0,
+                                                  'ingress_bytes': 0,
+                                                  'egress_pkts': 0,
+                                                  'egress_bytes': 0,
                                                   'time': 0,
                                                   'first_update': ts,
                                                   'last_update': ts})
-        info['bytes'] += bytes
-        info['pkts'] += pkts
+        info['ingress_pkts'] += ingress_pkts
+        info['ingress_bytes'] += ingress_bytes
+        info['egress_pkts'] += egress_pkts
+        info['egress_bytes'] += egress_bytes
         info['time'] += ts - info['last_update']
         info['last_update'] = ts
 
@@ -306,12 +312,12 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
                 self.label_tenant_id[label_id] = tenant_id
                 self.label_id_mappingto_title[label_id] = label['mappingtitle']
         accs = self._get_traffic_counters(self.context, self.routers.values())
-        LOG.debug('accs=%s', accs)
+
         if not accs:
             return
 
         for label_id, acc in accs.items():
-            self._add_metering_info(label_id, acc['pkts'], acc['bytes'])
+            self._add_metering_info(label_id, acc['ingress_pkts'], acc['ingress_bytes'],acc['egress_pkts'], acc['egress_bytes'])
 
     def _metering_loop(self):
         if self.initKafa:
@@ -387,7 +393,7 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
 
     def _get_traffic_counters(self, context, routers):
         LOG.debug("Get router traffic counters")
-        return self._invoke_driver(context, routers, 'get_traffic_counters')
+        return self._invoke_driver(context, routers, 'get_rule_level_traffic_counters')
 
     def _sync_router_namespaces(self, context, routers):
         LOG.debug("Sync router namespaces")
