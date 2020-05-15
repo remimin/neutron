@@ -462,6 +462,47 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
         return accs
 
     @log_helpers.log_method_call
+    def get_rule_level_traffic_counters(self, context, routers):
+        accs = {}
+        routers_to_reconfigure = set()
+        for router in routers:
+            rm = self.routers.get(router['id'])
+            if not rm:
+                continue
+
+            for label_id in rm.metering_labels:
+                try:
+                    chain = iptables_manager.get_chain_name(WRAP_NAME +
+                                                            RULE +
+                                                            label_id,
+                                                            wrap=False)
+
+                    chain_acc = rm.iptables_manager.get_up_down_traffic_counters(
+                        chain, wrap=False, zero=True)
+
+                except RuntimeError:
+                    LOG.exception('Failed to get traffic counters, '
+                                  'router: %s', router)
+                    routers_to_reconfigure.add(router['id'])
+                    continue
+
+                if not chain_acc:
+                    continue
+
+                acc = accs.get(label_id, {'ingress_pkts': 0, 'ingress_bytes': 0,'egress_pkts': 0, 'egress_bytes': 0})
+
+                acc['ingress_pkts'] += chain_acc['ingress_pkts']
+                acc['ingress_bytes'] += chain_acc['ingress_bytes']
+                acc['egress_pkts'] += chain_acc['egress_pkts']
+                acc['egress_bytes'] += chain_acc['egress_bytes']
+                accs[label_id] = acc
+
+        for router_id in routers_to_reconfigure:
+            del self.routers[router_id]
+
+        return accs
+
+    @log_helpers.log_method_call
     def sync_router_namespaces(self, context, routers):
         for router in routers:
             rm = self.routers.get(router['id'])

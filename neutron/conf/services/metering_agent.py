@@ -25,6 +25,21 @@ metering_agent_opts = [
                help=_("Interval between two metering measures")),
     cfg.IntOpt('report_interval', default=300,
                help=_("Interval between two metering reports")),
+    cfg.StrOpt('kafka_host',
+               default='',
+               help=_('The kafka server ip:port.')),
+    cfg.StrOpt('monitor_topic_router',
+               default='monitor_topic_router',
+               help=_('topic name for reporting router counter')),
+    cfg.StrOpt('monitor_topic_fip',
+               default='monitor_topic_fip',
+               help=_('topic name for reporting fip counter')),
+    cfg.StrOpt('monitor_topic_vpc',
+               default='monitor_topic_vpc',
+               help=_('topic name for reporting vpc counter')),
+    cfg.StrOpt('monitor_topic_vm_healthchk',
+               default='monitor_topic_vm_healthchk',
+               help=_('topic name for reporting vm health check counter')),
 ]
 
 
