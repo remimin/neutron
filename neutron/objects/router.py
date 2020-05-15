@@ -246,7 +246,9 @@ class Router(base.NeutronDbObject):
         query = context.session.query(l3.Router)
         query = query.filter(
             l3.Router.id == router_id)
-        router_obj = query.distinct().one()
+        router_obj = query.one_or_none()
+        if router_obj is None:
+            return None
         return cls._load_object(context, router_obj)
 
 
@@ -265,6 +267,8 @@ class FloatingIP(base.NeutronDbObject):
         'floating_port_id': common_types.UUIDField(),
         'fixed_port_id': common_types.UUIDField(nullable=True),
         'fixed_ip_address': obj_fields.IPAddressField(nullable=True),
+        'admin_state_up': obj_fields.BooleanField(nullable=True),
+        'fip_type': obj_fields.StringField(nullable=True),
         'router_id': common_types.UUIDField(nullable=True),
         'last_known_router_id': common_types.UUIDField(nullable=True),
         'status': common_types.FloatingIPStatusEnumField(nullable=True),
@@ -337,6 +341,15 @@ class FloatingIP(base.NeutronDbObject):
         query = query.filter(and_(l3.FloatingIP.router_id.in_(router_ids),
                                   l3.FloatingIP.fixed_port_id.is_(None)))
         return cls._unique_gw_and_ipv6_port_floatingip_iterator(context, query)
+
+    @classmethod
+    def get_floating_ip_by_fip_port_id(cls, context, port_id):
+        query = context.session.query(l3.FloatingIP)
+        query = query.filter(l3.FloatingIP.floating_port_id == port_id)
+        floatingip_obj = query.one_or_none()
+        if floatingip_obj is None:
+            return None
+        return cls._load_object(context, floatingip_obj)
 
     @classmethod
     def _unique_floatingip_iterator(cls, context, query):

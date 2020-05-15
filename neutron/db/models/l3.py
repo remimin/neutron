@@ -94,6 +94,8 @@ class FloatingIP(standard_attr.HasStandardAttributes, model_base.BASEV2,
                                   foreign_keys='FloatingIP.fixed_port_id',
                                   lazy='joined')
     fixed_ip_address = sa.Column(sa.String(64))
+    admin_state_up = sa.Column(sa.Boolean())
+    fip_type = sa.Column(sa.String(15))
     router_id = sa.Column(sa.String(36), sa.ForeignKey('routers.id'))
     # Additional attribute for keeping track of the router where the floating
     # ip was associated in order to be able to ensure consistency even if an
