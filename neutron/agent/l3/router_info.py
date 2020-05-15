@@ -75,6 +75,7 @@ class RouterInfo(object):
             use_ipv6=use_ipv6,
             namespace=self.ns_name)
         self.initialize_address_scope_iptables()
+        self.initialize_address_fip_admin_iptables()
         self.initialize_metadata_iptables()
         self.routes = []
         self.driver = interface_driver
@@ -241,7 +242,7 @@ class RouterInfo(object):
         for fip in floating_ips:
             # Rebuild iptables rules for the floating ip.
             fip_ip = fip['floating_ip_address']
-            if fip['fixed_ip_address'] is None:
+            if fip['fip_type'] != lib_constants.FLOATINGIP_TYPE_FIP:
                 continue
             addr = netaddr.IPAddress(fip_ip)
             if addr.version == lib_constants.IP_VERSION_4:
@@ -309,8 +310,6 @@ class RouterInfo(object):
             addr = netaddr.IPAddress(fip_ip)
             # Send the floating ip traffic to the right address scope
             fixed_ip = fip['fixed_ip_address']
-            if fixed_ip is None:
-                continue
             fixed_scope = fip.get('fixed_ip_address_scope')
             internal_mark = self.get_address_scope_mark_mask(fixed_scope)
             mangle_rules = self.floating_mangle_rules(
@@ -322,6 +321,22 @@ class RouterInfo(object):
                 else:
                     self.iptables_manager.ipv6['mangle'].add_rule(
                         chain, rule, tag='floating_ip')
+
+    def process_floating_ip_address_fip_admin_rules(self):
+        self.iptables_manager.ipv6['filter'].empty_chain('fip_admin')
+        floating_ips = self.get_floating_ips()
+        ex_gw_port = self.get_ex_gw_port()
+        if not ex_gw_port:
+            return
+        device_name = self.get_external_device_interface_name(ex_gw_port)
+        for fip in floating_ips:
+            admin_state_up = fip['admin_state_up']
+            floating_ip_type = fip['fip_type']
+            floating_ip_address = fip['floating_ip_address']
+            fip_admin_rules = self.address_fip_admin_filter_rule(device_name, floating_ip_address)
+            for rule in fip_admin_rules:
+                if  floating_ip_type == lib_constants.FLOATINGIP_TYPE_ECS_IPv6 and not admin_state_up:
+                    self.iptables_manager.ipv6['filter'].add_rule('fip_admin', rule, tag='floatingip_admin')
 
     def process_snat_dnat_for_fip(self):
         try:
@@ -390,7 +405,7 @@ class RouterInfo(object):
         floating_ips = self.get_floating_ips()
         # Loop once to ensure that floating ips are configured.
         for fip in floating_ips:
-            if fip['fixed_ip_address'] is None:
+            if fip['fip_type'] != lib_constants.FLOATINGIP_TYPE_FIP:
                 continue
             fip_ip = fip['floating_ip_address']
             ip_cidr = common_utils.ip_to_cidr(fip_ip)
@@ -595,6 +610,11 @@ class RouterInfo(object):
     def address_scope_filter_rule(self, device_name, mark_mask):
         return '-o %s -m mark ! --mark %s -j DROP' % (
             device_name, mark_mask)
+
+    def address_fip_admin_filter_rule(self, device_name, floating_ip):
+        traffic_to_floating_ip = ('-i %s -d %s/128 -j DROP' % (device_name, floating_ip))
+        traffic_from_floating_ip = ('-o %s -s %s/128 -j DROP' % (device_name, floating_ip))
+        return [traffic_to_floating_ip, traffic_from_floating_ip]
 
     def _process_internal_ports(self):
         existing_port_ids = set(p['id'] for p in self.internal_ports)
@@ -1012,6 +1032,7 @@ class RouterInfo(object):
                 if not ex_gw_port:
                     return
 
+
                 # Process SNAT/DNAT rules and addresses for floating IPs
                 self.process_snat_dnat_for_fip()
 
@@ -1091,6 +1112,14 @@ class RouterInfo(object):
             'PREROUTING', mark_new_ingress_address_scope_by_interface)
         iptables_manager.ipv6['mangle'].add_rule(
             'PREROUTING', copy_address_scope_for_existing)
+
+    def initialize_address_fip_admin_iptables(self):
+        self._initialize_address_fip_admin_iptables(self.iptables_manager)
+
+    def _initialize_address_fip_admin_iptables(self, iptables_manager):
+        # Add address fip admin related chains
+        iptables_manager.ipv6['filter'].add_chain('fip_admin')
+        iptables_manager.ipv6['filter'].add_rule('FORWARD', '-j $fip_admin')
 
     def initialize_metadata_iptables(self):
         # Always mark incoming metadata requests, that way any stray
@@ -1229,6 +1258,10 @@ class RouterInfo(object):
             self.process_ports_address_scope_iptables()
             self.process_floating_ip_address_scope_rules()
 
+    def process_address_fip_admin(self):
+        with self.iptables_manager.defer_apply():
+            self.process_floating_ip_address_fip_admin_rules()
+
     @common_utils.exception_logger()
     def process_delete(self):
         """Process the delete of this router
@@ -1265,6 +1298,7 @@ class RouterInfo(object):
         self.agent.pd.sync_router(self.router['id'])
         self.process_external()
         self.process_address_scope()
+        self.process_address_fip_admin()
         # Process static routes for router
         self.routes_updated(self.routes, self.router['routes'])
         self.routes = self.router['routes']

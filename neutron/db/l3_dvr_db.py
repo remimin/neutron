@@ -1186,7 +1186,7 @@ class L3_NAT_with_dvr_db_mixin(_DVRAgentInterfaceMixin,
         router_id = floating_ip['router_id']
         fixed_port_id = floating_ip['port_id']
         # we need to notify agents only in case Floating IP is associated
-        if not router_id or not fixed_port_id:
+        if not router_id:
             return
 
         try:
