@@ -423,6 +423,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                             floating_port_id=gw_port['id'],
                             router_id=router.id,
                             status=constants.FLOATINGIP_STATUS_ACTIVE,
+                            admin_state_up=True,
+                            fip_type=constants.FLOATINGIP_TYPE_GW
                         )
                         gw_to_fip.create()
 
@@ -968,11 +970,9 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 if subnet['ip_version'] == 6:
                     subnet_id = subnet['id']
                     ipv6_allocs_of_subnet = \
-                        port_obj.IPAllocation.\
-                            get_allocs_by_subnet_id(context,
-                                                    subnet_id,
-                                                    DEVICE_OWNER_ROUTER_AND_DHCP,
-                                                    True)
+                        port_obj.IPAllocation.get_allocs_by_subnet_id(
+                            context, subnet_id,
+                            DEVICE_OWNER_ROUTER_AND_DHCP, True)
                     for ipv6_alloc in ipv6_allocs_of_subnet:
                         port_ipv6_addr_to_fip = l3_obj.FloatingIP(
                             context,
@@ -983,6 +983,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                             floating_port_id=ipv6_alloc.port_id,
                             router_id=router.id,
                             status=constants.FLOATINGIP_STATUS_ACTIVE,
+                            admin_state_up=False,
+                            fip_type=constants.FLOATINGIP_TYPE_ECS_IPv6
                         )
                         port_ipv6_addr_to_fip.create()
 
@@ -1138,8 +1140,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                     fips_of_subnets = \
                         [self._make_ipv6_port_floatingip_dict(fips_obj_of_subnets)
                          for fips_obj_of_subnets in
-                         l3_obj.FloatingIP.get_ipv6_port_fip_by_subnet(context,
-                                                                       subnet_id)]
+                         l3_obj.FloatingIP.get_ipv6_port_fip_by_subnet(
+                             context, subnet_id)]
                     for fip in fips_of_subnets:
                         floatingip_obj = self._get_floatingip(context, fip['id'])
                         floatingip_obj.delete()
@@ -1169,7 +1171,9 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                'router_id': floatingip.router_id,
                'port_id': floatingip.fixed_port_id,
                'fixed_ip_address': fixed_ip_address,
-               'status': floatingip.status}
+               'status': floatingip.status,
+               'admin_state_up': floatingip.admin_state_up,
+               'fip_type': floatingip.fip_type}
         # NOTE(mlavalle): The following assumes this mixin is used in a
         # class inheriting from CommonDbMixin, which is true for all existing
         # plugins.
@@ -1411,6 +1415,14 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         floatingip_obj.last_known_router_id = previous_router_id
         if 'description' in fip:
             floatingip_obj.description = fip['description']
+        if floatingip_obj.fixed_port_id:
+            floatingip_obj.admin_state_up = True
+        elif not floatingip_obj.router_id:
+            floatingip_obj.admin_state_up = False
+        elif floatingip_obj.fip_type == constants.FLOATINGIP_TYPE_FIP:
+            floatingip_obj.admin_state_up = True
+        if 'admin_state_up' in fip:
+            floatingip_obj.admin_state_up = fip['admin_state_up']
         floating_ip_address = (str(floatingip_obj.floating_ip_address)
             if floatingip_obj.floating_ip_address else None)
         return {'fixed_ip_address': internal_ip_address,
@@ -1420,7 +1432,9 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 'floating_ip_address': floating_ip_address,
                 'floating_network_id': floatingip_obj.floating_network_id,
                 'floating_ip_id': floatingip_obj.id,
-                'context': context}
+                'context': context,
+                'admin_state_up': floatingip_obj.admin_state_up,
+                'fip_type': floatingip_obj.fip_type}
 
     def _is_ipv4_network(self, context, net_id):
         net = self._core_plugin._get_network(context, net_id)
@@ -1504,7 +1518,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 floating_network_id=fip['floating_network_id'],
                 floating_ip_address=floating_ip_address,
                 floating_port_id=external_port['id'],
-                description=fip.get('description'))
+                description=fip.get('description'),
+                fip_type=constants.FLOATINGIP_TYPE_FIP)
             # Update association with internal port
             # and define external IP address
             assoc_result = self._update_fip_assoc(
@@ -1601,17 +1616,6 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         resource_extend.apply_funcs(l3_apidef.FLOATINGIPS, floatingip_dict,
                                     floatingip_db)
 
-        # Determine if it is gw ip or ecs ip, and manually notify l3-agent
-        if floatingip_dict['router_id'] and \
-                old_floatingip['fixed_ip_address'] is None and \
-                floatingip_dict['fixed_ip_address'] is None:
-            router_id = floatingip_dict['router_id']
-            router_ids = list()
-            router_ids.append(router_id)
-            l3_rpc_notifier = l3_rpc_agent_api.L3AgentNotifyAPI()
-            l3_rpc_notifier.routers_updated(context,
-                                            router_ids, 'update_floatingip')
-
         return old_floatingip, floatingip_dict
 
     def _floatingips_to_router_ids(self, floatingips):
@@ -1653,16 +1657,6 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                                       l3_port_check=False)
         registry.notify(resources.FLOATING_IP, events.AFTER_DELETE,
                         self, **floatingip_dict)
-
-        # Determine if it is gw ip or ecs ip, and manually notify l3-agent
-        if floatingip_dict['router_id'] and \
-                floatingip_dict['fixed_ip_address'] is None:
-            router_id = floatingip_dict['router_id']
-            router_ids = list()
-            router_ids.append(router_id)
-            l3_rpc_notifier = l3_rpc_agent_api.L3AgentNotifyAPI()
-            l3_rpc_notifier.routers_updated(context,
-                                            router_ids, 'delete_floatingip')
 
         return floatingip_dict
 
@@ -1777,7 +1771,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
             old_fips = {fip.id: fip.to_dict() for fip in floating_ip_objs}
             values = {'fixed_port_id': None,
                       'fixed_ip_address': None,
-                      'router_id': None}
+                      'router_id': None,
+                      'admin_state_up': False}
             l3_obj.FloatingIP.update_objects(
                 context, values, fixed_port_id=port_id)
             for fip in floating_ip_objs:
@@ -1798,6 +1793,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 'floating_ip_id': fip.id,
                 'context': context,
                 'router_ids': router_ids,
+                'admin_state_up': False
             }
             registry.notify(resources.FLOATING_IP, events.AFTER_UPDATE, self,
                             **assoc_result)
