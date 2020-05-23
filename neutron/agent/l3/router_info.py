@@ -241,9 +241,12 @@ class RouterInfo(object):
         # Loop once to ensure that floating ips are configured.
         for fip in floating_ips:
             # Rebuild iptables rules for the floating ip.
-            fip_ip = fip['floating_ip_address']
-            if fip['fip_type'] != lib_constants.FLOATINGIP_TYPE_FIP:
+            if fip['fip_type'] != lib_constants.FLOATINGIP_TYPE_FIP or (
+                    fip['fip_type'] == lib_constants.FLOATINGIP_TYPE_FIP and
+                    not fip['fixed_ip_address']):
                 continue
+
+            fip_ip = fip['floating_ip_address']
             addr = netaddr.IPAddress(fip_ip)
             if addr.version == lib_constants.IP_VERSION_4:
                 for chain, rule in self.floating_forward_rules(fip):
@@ -405,12 +408,12 @@ class RouterInfo(object):
         floating_ips = self.get_floating_ips()
         # Loop once to ensure that floating ips are configured.
         for fip in floating_ips:
+            fip_statuses[fip['id']] = lib_constants.FLOATINGIP_STATUS_ACTIVE
             if fip['fip_type'] != lib_constants.FLOATINGIP_TYPE_FIP:
                 continue
             fip_ip = fip['floating_ip_address']
             ip_cidr = common_utils.ip_to_cidr(fip_ip)
             new_cidrs.add(ip_cidr)
-            fip_statuses[fip['id']] = lib_constants.FLOATINGIP_STATUS_ACTIVE
 
             if ip_cidr not in existing_cidrs:
                 fip_statuses[fip['id']] = self.add_floating_ip(
