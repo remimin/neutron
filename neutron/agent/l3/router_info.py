@@ -241,6 +241,7 @@ class RouterInfo(object):
         # Loop once to ensure that floating ips are configured.
         for fip in floating_ips:
             # Rebuild iptables rules for the floating ip.
+            # Filter out 'gatewayip', 'ecs ipv6' and using port_forwarding fips
             if fip['fip_type'] != lib_constants.FLOATINGIP_TYPE_FIP or (
                     fip['fip_type'] == lib_constants.FLOATINGIP_TYPE_FIP and
                     not fip['fixed_ip_address']):
@@ -409,7 +410,10 @@ class RouterInfo(object):
         # Loop once to ensure that floating ips are configured.
         for fip in floating_ips:
             fip_statuses[fip['id']] = lib_constants.FLOATINGIP_STATUS_ACTIVE
-            if fip['fip_type'] != lib_constants.FLOATINGIP_TYPE_FIP:
+            #Filter out 'gatewayip', 'ecs ipv6' and using port_forwarding fips
+            if fip['fip_type'] != lib_constants.FLOATINGIP_TYPE_FIP or (
+                    fip['fip_type'] == lib_constants.FLOATINGIP_TYPE_FIP and
+                    not fip['fixed_ip_address']):
                 continue
             fip_ip = fip['floating_ip_address']
             ip_cidr = common_utils.ip_to_cidr(fip_ip)
