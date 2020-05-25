@@ -375,10 +375,9 @@ class FloatingIP(base.NeutronDbObject):
     def get_floating_ip_by_fip_port_id(cls, context, port_id):
         query = context.session.query(l3.FloatingIP)
         query = query.filter(l3.FloatingIP.floating_port_id == port_id)
-        floatingip_obj = query.one_or_none()
-        if floatingip_obj is None:
-            return None
-        return cls._load_object(context, floatingip_obj)
+        floatingip_objs = query.all()
+        return [cls._load_object(context, floatingip_obj)
+                for floatingip_obj in floatingip_objs]
 
     @classmethod
     def _unique_floatingip_iterator(cls, context, query):

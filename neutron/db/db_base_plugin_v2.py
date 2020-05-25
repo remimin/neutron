@@ -1430,13 +1430,14 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
     @db_api.retry_if_session_inactive()
     def delete_port(self, context, id):
         with db_api.context_manager.writer.using(context):
-            fip_obj = l3_obj.FloatingIP.get_floating_ip_by_fip_port_id(
+            fip_objs = l3_obj.FloatingIP.get_floating_ip_by_fip_port_id(
                 context, id)
             self.ipam.delete_port(context, id)
-            if fip_obj and fip_obj.router_id and \
-                    fip_obj.fip_type == constants.FLOATINGIP_TYPE_ECS_IPv6:
-                self.l3_rpc_notifier.routers_updated(
-                    context, [fip_obj.router_id], 'delete_floatingip')
+            for fip_obj in fip_objs:
+                if fip_obj.router_id and fip_obj.fip_type == \
+                        constants.FLOATINGIP_TYPE_ECS_IPv6:
+                    self.l3_rpc_notifier.routers_updated(
+                        context, [fip_obj.router_id], 'delete_floatingip')
 
     def delete_ports_by_device_id(self, context, device_id, network_id=None):
         with db_api.context_manager.reader.using(context):
