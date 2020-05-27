@@ -302,13 +302,15 @@ class FloatingIP(base.NeutronDbObject):
         return result
 
     @classmethod
-    def get_ecs_ipv6_fip_by_subnet(cls, context, subnet_id):
+    def get_ecs_ipv6_fips_by_subnet(cls, context, subnet_id):
         query = context.session.query(l3.FloatingIP)
         query = query.join(models_v2.IPAllocation,
                            l3.FloatingIP.floating_ip_address ==
                            models_v2.IPAllocation.ip_address)
         query = query.filter(models_v2.IPAllocation.subnet_id == subnet_id)
-        return cls._unique_fip_iterator(context, query)
+        floatingip_objs = query.all()
+        return [cls._load_object(context, floatingip_obj)
+                for floatingip_obj in floatingip_objs]
 
     @classmethod
     def get_scoped_floating_ips(cls, context, router_ids):
