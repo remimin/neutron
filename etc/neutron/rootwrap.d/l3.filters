@@ -49,6 +49,10 @@ l3_tc_add_v6_all_prot_filter_ingress: RegExpFilter, tc, root, tc, filter, add, d
 l3_tc_add_v6_all_prot_filter_egress:  RegExpFilter, tc, root, tc, filter, add, dev, .+, parent, .+, protocol, all, prio, 1, u32, match, ip6, src, .+, police, rate, .+, burst, .+, mtu, 64kb, drop, flowid, :1
 l3_tc_add_v4_all_prot_filter_ingress: RegExpFilter, tc, root, tc, filter, add, dev, .+, parent, .+, protocol, all, prio, 1, u32, match, ip, dst, .+, police, rate, .+, burst, .+, mtu, 64kb, drop, flowid, :1
 l3_tc_add_v4_all_prot_filter_egress:  RegExpFilter, tc, root, tc, filter, add, dev, .+, parent, .+, protocol, all, prio, 1, u32, match, ip, src, .+, police, rate, .+, burst, .+, mtu, 64kb, drop, flowid, :1
+l3_tc_add_class_egress: RegExpFilter, tc, root, tc, class, replace, dev, .+, parent, .+, classid, .+, htb, rate, .+, burst, .+, mtu, 65535
+l3_tc_show_class_egress: RegExpFilter, tc, root, tc, class, show, dev, .+, parent, .+
+l3_tc_delete_class_egress: RegExpFilter, tc, root, tc, class, del, dev, .+, classid, .+
+l3_tc_add_all_prot_filter_egress:  RegExpFilter, tc, root, tc, filter, add, dev, .+, parent, .+, protocol, all, prio, 1, u32, match, .+, src, .+, flowid, .+
 
 # For ip monitor
 kill_ip_monitor: KillFilter, root, ip, -9

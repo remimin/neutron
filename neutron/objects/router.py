@@ -302,13 +302,15 @@ class FloatingIP(base.NeutronDbObject):
         return result
 
     @classmethod
-    def get_ipv6_port_fip_by_subnet(cls, context, subnet_id):
+    def get_ecs_ipv6_fips_by_subnet(cls, context, subnet_id):
         query = context.session.query(l3.FloatingIP)
         query = query.join(models_v2.IPAllocation,
                            l3.FloatingIP.floating_ip_address ==
                            models_v2.IPAllocation.ip_address)
         query = query.filter(models_v2.IPAllocation.subnet_id == subnet_id)
-        return cls._unique_gw_and_ipv6_port_floatingip_iterator(context, query)
+        floatingip_objs = query.all()
+        return [cls._load_object(context, floatingip_obj)
+                for floatingip_obj in floatingip_objs]
 
     @classmethod
     def get_scoped_floating_ips(cls, context, router_ids):
@@ -328,28 +330,56 @@ class FloatingIP(base.NeutronDbObject):
         return cls._unique_floatingip_iterator(context, query)
 
     @classmethod
-    def get_gw_and_ipv6_port_fip_count_by_router(cls, context, router_id):
+    def get_gw_fip_count_by_router(cls, context, router_id):
         query = context.session.query(l3.FloatingIP)
         query = query.filter(and_(l3.FloatingIP.router_id == router_id,
-                                  l3.FloatingIP.fixed_port_id.is_(None)))
+                                  l3.FloatingIP.fip_type ==
+                                  const.FLOATINGIP_TYPE_GW))
         return query.count()
 
     @classmethod
-    def get_gw_and_ipv6_port_floating_ip(cls, context, router_ids):
-        # Filter out on router_ids and fixed_port_id as None
+    def get_ecs_ipv6_fip_count_by_router(cls, context, router_id):
+        query = context.session.query(l3.FloatingIP)
+        query = query.filter(and_(l3.FloatingIP.router_id == router_id,
+                                  l3.FloatingIP.fip_type ==
+                                  const.FLOATINGIP_TYPE_ECS_IPv6))
+        return query.count()
+
+    @classmethod
+    def get_pf_floating_ips(cls, context, router_ids):
+        # Filter out on router_ids and fip_type
         query = context.session.query(l3.FloatingIP)
         query = query.filter(and_(l3.FloatingIP.router_id.in_(router_ids),
-                                  l3.FloatingIP.fixed_port_id.is_(None)))
-        return cls._unique_gw_and_ipv6_port_floatingip_iterator(context, query)
+                                  l3.FloatingIP.fip_type ==
+                                  const.FLOATINGIP_TYPE_FIP))
+        query = query.filter(l3.FloatingIP.fixed_port_id.is_(None))
+        return cls._unique_fip_iterator(context, query)
+
+    @classmethod
+    def get_gw_floating_ips(cls, context, router_ids):
+        # Filter out on router_ids and fip_type
+        query = context.session.query(l3.FloatingIP)
+        query = query.filter(and_(l3.FloatingIP.router_id.in_(router_ids),
+                                  l3.FloatingIP.fip_type ==
+                                  const.FLOATINGIP_TYPE_GW))
+        return cls._unique_fip_iterator(context, query)
+
+    @classmethod
+    def get_ecs_ipv6_floating_ips(cls, context, router_ids):
+        # Filter out on router_ids and fip_type
+        query = context.session.query(l3.FloatingIP)
+        query = query.filter(and_(l3.FloatingIP.router_id.in_(router_ids),
+                                  l3.FloatingIP.fip_type ==
+                                  const.FLOATINGIP_TYPE_ECS_IPv6))
+        return cls._unique_fip_iterator(context, query)
 
     @classmethod
     def get_floating_ip_by_fip_port_id(cls, context, port_id):
         query = context.session.query(l3.FloatingIP)
         query = query.filter(l3.FloatingIP.floating_port_id == port_id)
-        floatingip_obj = query.one_or_none()
-        if floatingip_obj is None:
-            return None
-        return cls._load_object(context, floatingip_obj)
+        floatingip_objs = query.all()
+        return [cls._load_object(context, floatingip_obj)
+                for floatingip_obj in floatingip_objs]
 
     @classmethod
     def _unique_floatingip_iterator(cls, context, query):
@@ -365,7 +395,7 @@ class FloatingIP(base.NeutronDbObject):
             yield (cls._load_object(context, row[0]), row[1])
 
     @classmethod
-    def _unique_gw_and_ipv6_port_floatingip_iterator(cls, context, query):
+    def _unique_fip_iterator(cls, context, query):
         """Iterates over only one row per floating ip. Ignores others."""
         # Group rows by fip id. They must be sorted by same.
         q = query.order_by(l3.FloatingIP.id)

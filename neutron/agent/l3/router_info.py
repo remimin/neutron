@@ -241,9 +241,13 @@ class RouterInfo(object):
         # Loop once to ensure that floating ips are configured.
         for fip in floating_ips:
             # Rebuild iptables rules for the floating ip.
-            fip_ip = fip['floating_ip_address']
-            if fip['fip_type'] != lib_constants.FLOATINGIP_TYPE_FIP:
+            # Filter out 'gatewayip', 'ecs ipv6' and using port_forwarding fips
+            if fip['fip_type'] != lib_constants.FLOATINGIP_TYPE_FIP or (
+                    fip['fip_type'] == lib_constants.FLOATINGIP_TYPE_FIP and
+                    not fip['fixed_ip_address']):
                 continue
+
+            fip_ip = fip['floating_ip_address']
             addr = netaddr.IPAddress(fip_ip)
             if addr.version == lib_constants.IP_VERSION_4:
                 for chain, rule in self.floating_forward_rules(fip):
@@ -323,12 +327,14 @@ class RouterInfo(object):
                         chain, rule, tag='floating_ip')
 
     def process_floating_ip_address_fip_admin_rules(self):
-        self.iptables_manager.ipv6['filter'].empty_chain('fip_admin')
+        self.iptables_manager.ipv6['filter'].empty_chain('fip-admin')
         floating_ips = self.get_floating_ips()
         ex_gw_port = self.get_ex_gw_port()
         if not ex_gw_port:
             return
         device_name = self.get_external_device_interface_name(ex_gw_port)
+        if self._snat66_enabled:
+            return
         for fip in floating_ips:
             admin_state_up = fip['admin_state_up']
             floating_ip_type = fip['fip_type']
@@ -336,7 +342,8 @@ class RouterInfo(object):
             fip_admin_rules = self.address_fip_admin_filter_rule(device_name, floating_ip_address)
             for rule in fip_admin_rules:
                 if  floating_ip_type == lib_constants.FLOATINGIP_TYPE_ECS_IPv6 and not admin_state_up:
-                    self.iptables_manager.ipv6['filter'].add_rule('fip_admin', rule, tag='floatingip_admin')
+                    self.iptables_manager.ipv6['filter'].add_rule(
+                        'fip-admin', rule, tag='floatingip_admin')
 
     def process_snat_dnat_for_fip(self):
         try:
@@ -405,12 +412,15 @@ class RouterInfo(object):
         floating_ips = self.get_floating_ips()
         # Loop once to ensure that floating ips are configured.
         for fip in floating_ips:
-            if fip['fip_type'] != lib_constants.FLOATINGIP_TYPE_FIP:
+            fip_statuses[fip['id']] = lib_constants.FLOATINGIP_STATUS_ACTIVE
+            #Filter out 'gatewayip', 'ecs ipv6' and using port_forwarding fips
+            if fip['fip_type'] != lib_constants.FLOATINGIP_TYPE_FIP or (
+                    fip['fip_type'] == lib_constants.FLOATINGIP_TYPE_FIP and
+                    not fip['fixed_ip_address']):
                 continue
             fip_ip = fip['floating_ip_address']
             ip_cidr = common_utils.ip_to_cidr(fip_ip)
             new_cidrs.add(ip_cidr)
-            fip_statuses[fip['id']] = lib_constants.FLOATINGIP_STATUS_ACTIVE
 
             if ip_cidr not in existing_cidrs:
                 fip_statuses[fip['id']] = self.add_floating_ip(
@@ -1118,8 +1128,8 @@ class RouterInfo(object):
 
     def _initialize_address_fip_admin_iptables(self, iptables_manager):
         # Add address fip admin related chains
-        iptables_manager.ipv6['filter'].add_chain('fip_admin')
-        iptables_manager.ipv6['filter'].add_rule('FORWARD', '-j $fip_admin')
+        iptables_manager.ipv6['filter'].add_chain('fip-admin')
+        iptables_manager.ipv6['filter'].add_rule('FORWARD', '-j $fip-admin')
 
     def initialize_metadata_iptables(self):
         # Always mark incoming metadata requests, that way any stray

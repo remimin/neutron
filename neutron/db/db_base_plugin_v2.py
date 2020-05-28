@@ -76,6 +76,7 @@ LOG = logging.getLogger(__name__)
 # with these owners, it will allow subnet deletion to proceed with the
 # IP allocations being cleaned up by cascade.
 AUTO_DELETE_PORT_OWNERS = [constants.DEVICE_OWNER_DHCP]
+CONVERTIBLE_DEVICE_OWNER = [constants.DEVICE_OWNER_LOADBALANCERV2, '']
 
 
 def _check_subnet_not_used(context, subnet_id):
@@ -1285,6 +1286,23 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         context.session.add(db_port)
         return db_port
 
+    def _convert_ecs_ipv6_to_fip(self, context, port_id, network_id,
+                                 router_id, port_fixed_ip, project_id):
+        fip_address = port_fixed_ip['ip_address']
+        ecs_ipv6_fip = l3_obj.FloatingIP(
+            context,
+            project_id=project_id,
+            id=uuidutils.generate_uuid(),
+            floating_ip_address=fip_address,
+            floating_network_id=network_id,
+            floating_port_id=port_id,
+            router_id=router_id,
+            status=constants.FLOATINGIP_STATUS_DOWN,
+            admin_state_up=False,
+            fip_type=constants.FLOATINGIP_TYPE_ECS_IPv6
+        )
+        ecs_ipv6_fip.create()
+
     @db_api.retry_if_session_inactive()
     def create_port(self, context, port):
         db_port = self.create_port_db(context, port)
@@ -1333,23 +1351,21 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
 
         try:
             # Ensure that the port does not belong to a router or dhcp server
-            if not p['device_owner'] or p['device_owner'].startswith(
-                    constants.DEVICE_OWNER_COMPUTE_PREFIX):
+            if p['device_owner'] in CONVERTIBLE_DEVICE_OWNER or \
+                    p['device_owner'].startswith(
+                        constants.DEVICE_OWNER_COMPUTE_PREFIX):
                 for port_fixed_ip in port_fixed_ips:
                     if netaddr.IPAddress(port_fixed_ip['ip_address']).version \
                             == constants.IP_VERSION_6:
                         router_id = l3_obj.RouterPort.get_router_id_by_subnet(
                             context, port_fixed_ip['subnet_id'])
+                        self._convert_ecs_ipv6_to_fip(
+                            context, port_id, network_id,
+                            router_id, port_fixed_ip, p['tenant_id'])
                         if router_id is None:
                             continue
-                        router = l3_obj.Router.get_router_by_id(
-                            context, router_id)
-                        if router and not router.enable_snat66:
-                            self._convert_port_ipv6_addr_to_fip(
-                                context, port_id, network_id, router_id,
-                                port_fixed_ip, p['tenant_id'])
-                            self.l3_rpc_notifier.routers_updated(
-                                context, [router_id], 'create_floatingip')
+                        self.l3_rpc_notifier.routers_updated(
+                            context, [router_id], 'create_floatingip')
         except Exception as e:
             msg = _("IPv6 address belonging to the port %s "
                     "failed to convert to floatingip, because %s") \
@@ -1357,24 +1373,6 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             raise exc.BadRequest(resource='floatingip', msg=msg)
 
         return db_port
-
-    def _convert_port_ipv6_addr_to_fip(self, context,
-                                       port_id, network_id, router_id,
-                                       port_fixed_ip, project_id):
-        fip_address = port_fixed_ip['ip_address']
-        port_ipv6_addr_to_fip = l3_obj.FloatingIP(
-            context,
-            project_id=project_id,
-            id=uuidutils.generate_uuid(),
-            floating_ip_address=fip_address,
-            floating_network_id=network_id,
-            floating_port_id=port_id,
-            router_id=router_id,
-            status=constants.FLOATINGIP_STATUS_ACTIVE,
-            admin_state_up=False,
-            fip_type=constants.FLOATINGIP_TYPE_ECS_IPv6
-        )
-        port_ipv6_addr_to_fip.create()
 
     def _validate_port_for_update(self, context, db_port, new_port, new_mac):
         changed_owner = 'device_owner' in new_port
@@ -1430,13 +1428,14 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
     @db_api.retry_if_session_inactive()
     def delete_port(self, context, id):
         with db_api.context_manager.writer.using(context):
-            fip_obj = l3_obj.FloatingIP.get_floating_ip_by_fip_port_id(
+            fip_objs = l3_obj.FloatingIP.get_floating_ip_by_fip_port_id(
                 context, id)
             self.ipam.delete_port(context, id)
-            if fip_obj and fip_obj.router_id and \
-                    fip_obj.fip_type == constants.FLOATINGIP_TYPE_ECS_IPv6:
-                self.l3_rpc_notifier.routers_updated(
-                    context, [fip_obj.router_id], 'delete_floatingip')
+            for fip_obj in fip_objs:
+                if fip_obj.router_id and fip_obj.fip_type == \
+                        constants.FLOATINGIP_TYPE_ECS_IPv6:
+                    self.l3_rpc_notifier.routers_updated(
+                        context, [fip_obj.router_id], 'delete_floatingip')
 
     def delete_ports_by_device_id(self, context, device_id, network_id=None):
         with db_api.context_manager.reader.using(context):

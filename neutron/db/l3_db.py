@@ -380,6 +380,29 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
 
         return candidates
 
+    def _convert_gateway_ips_to_fip(self, context, router,
+                                    gw_port, network_id):
+        for fixed_ip in gw_port['fixed_ips']:
+            ip_addr = fixed_ip['ip_address']
+            ipv4_condition = netaddr.IPNetwork(ip_addr).version == 4 \
+                             and router.enable_snat
+            ipv6_condition = netaddr.IPNetwork(ip_addr).version == 6 \
+                             and router.enable_snat66
+            if ipv4_condition or ipv6_condition:
+                gw_to_fip = l3_obj.FloatingIP(
+                    context,
+                    project_id=router.project_id,
+                    id=uuidutils.generate_uuid(),
+                    floating_ip_address=ip_addr,
+                    floating_network_id=network_id,
+                    floating_port_id=gw_port['id'],
+                    router_id=router.id,
+                    status=constants.FLOATINGIP_STATUS_ACTIVE,
+                    admin_state_up=True,
+                    fip_type=constants.FLOATINGIP_TYPE_GW
+                )
+                gw_to_fip.create()
+
     def _create_router_gw_port(self, context, router, network_id, ext_ips):
         # Port has no 'tenant-id', as it is hidden from user
         port_data = {'tenant_id': '',  # intentionally not set
@@ -409,24 +432,13 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 context.session.add(router)
                 router_port.create()
 
-                for fixed_ip in gw_port['fixed_ips']:
-                    if (netaddr.IPNetwork(fixed_ip['ip_address']).version == 4
-                        and router.enable_snat) or \
-                        (netaddr.IPNetwork(fixed_ip['ip_address']).version == 6
-                        and router.enable_snat66):
-                        gw_to_fip = l3_obj.FloatingIP(
-                            context,
-                            project_id=router['project_id'],
-                            id=uuidutils.generate_uuid(),
-                            floating_ip_address=fixed_ip['ip_address'],
-                            floating_network_id=network_id,
-                            floating_port_id=gw_port['id'],
-                            router_id=router.id,
-                            status=constants.FLOATINGIP_STATUS_ACTIVE,
-                            admin_state_up=True,
-                            fip_type=constants.FLOATINGIP_TYPE_GW
-                        )
-                        gw_to_fip.create()
+                try:
+                    self._convert_gateway_ips_to_fip(
+                        context, router, gw_port, network_id)
+                except Exception as e:
+                    msg = _("Gateway ip belonging to the router %s failed to "
+                            "convert to floatingip, because %s") % (router.id, e)
+                    raise n_exc.BadRequest(resource='floatingip', msg=msg)
 
     def _validate_gw_info(self, context, gw_port, info, ext_ips):
         network_id = info['network_id'] if info else None
@@ -452,12 +464,14 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
     # inheriting this class.  Do not optimize this out.
     def router_gw_port_has_floating_ips(self, context, router_id):
         """Return True if the router's gateway port is serving floating IPs."""
-        # Since each gateway ip is also regarded as a fip
-        # minus the number of gateway ips
+        # Since each gateway ip or ecs ipv6 is also regarded as a fip
+        # minus the number of gateway ips and ecs ipv6 ports
         return bool(self.get_floatingips_count(context,
                                                {'router_id': [router_id]})-
-                    l3_obj.FloatingIP.get_gw_and_ipv6_port_fip_count_by_router
-                    (context, router_id))
+                    l3_obj.FloatingIP.get_gw_fip_count_by_router(
+                        context, router_id) -
+                    l3_obj.FloatingIP.get_ecs_ipv6_fip_count_by_router(
+                        context, router_id))
 
     def _delete_current_gw_port(self, context, router_id, router,
                                 new_network_id):
@@ -899,6 +913,18 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
             'subnet_ids': subnet_ids
         }
 
+    def _update_ecs_ipv6_fips_of_subnet(self, context, router, subnets, action):
+        for subnet in subnets:
+            if subnet['ip_version'] == 6:
+                subnet_id = subnet['id']
+                fip_objs = l3_obj.FloatingIP.get_ecs_ipv6_fips_by_subnet(
+                    context, subnet_id)
+                new_router_id = router.id \
+                    if action == 'add_router_interface' else None
+                for fip_obj in fip_objs:
+                    fip_obj.router_id = new_router_id
+                    fip_obj.update()
+
     @db_api.retry_if_session_inactive()
     def add_router_interface(self, context, router_id, interface_info=None):
         router = self._get_router(context, router_id)
@@ -965,28 +991,13 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         with context.session.begin(subtransactions=True):
             context.session.refresh(router)
 
-        if not router.enable_snat66:
-            for subnet in subnets:
-                if subnet['ip_version'] == 6:
-                    subnet_id = subnet['id']
-                    ipv6_allocs_of_subnet = \
-                        port_obj.IPAllocation.get_allocs_by_subnet_id(
-                            context, subnet_id,
-                            DEVICE_OWNER_ROUTER_AND_DHCP, True)
-                    for ipv6_alloc in ipv6_allocs_of_subnet:
-                        port_ipv6_addr_to_fip = l3_obj.FloatingIP(
-                            context,
-                            project_id=router.project_id,
-                            id=uuidutils.generate_uuid(),
-                            floating_ip_address=ipv6_alloc.ip_address,
-                            floating_network_id=ipv6_alloc.network_id,
-                            floating_port_id=ipv6_alloc.port_id,
-                            router_id=router.id,
-                            status=constants.FLOATINGIP_STATUS_ACTIVE,
-                            admin_state_up=False,
-                            fip_type=constants.FLOATINGIP_TYPE_ECS_IPv6
-                        )
-                        port_ipv6_addr_to_fip.create()
+        try:
+            self._update_ecs_ipv6_fips_of_subnet(
+                context, router, subnets, 'add_router_interface')
+        except Exception as e:
+            msg = _("ECS IPv6 fips of subnet failed to update when add"
+                    " interface to router %s, because %s") % (router.id, e)
+            raise exc.BadRequest(resource='floatingip', msg=msg)
 
         return self._make_router_interface_info(
             router.id, port['tenant_id'], port['id'], port['network_id'],
@@ -1133,18 +1144,13 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         with context.session.begin(subtransactions=True):
             context.session.refresh(router)
 
-        if not router.enable_snat66:
-            for subnet in subnets:
-                if subnet['ip_version'] == 6:
-                    subnet_id = subnet['id']
-                    fips_of_subnets = \
-                        [self._make_ipv6_port_floatingip_dict(fips_obj_of_subnets)
-                         for fips_obj_of_subnets in
-                         l3_obj.FloatingIP.get_ipv6_port_fip_by_subnet(
-                             context, subnet_id)]
-                    for fip in fips_of_subnets:
-                        floatingip_obj = self._get_floatingip(context, fip['id'])
-                        floatingip_obj.delete()
+        try:
+            self._update_ecs_ipv6_fips_of_subnet(
+                context, router, subnets, 'remove_router_interface')
+        except Exception as e:
+            msg = _("ECS IPv6 fips failed to update when remove "
+                    "subnet from router %s, because %s") % (router.id, e)
+            raise exc.BadRequest(resource='floatingip', msg=msg)
 
         return self._make_router_interface_info(router_id, port['tenant_id'],
                                                 port['id'], port['network_id'],
@@ -1845,11 +1851,15 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         d['fixed_ip_address_scope'] = scope_id
         return d
 
-    def _make_gw_and_ipv6_port_floatingip_dict(self, floatingip_obj):
+    def _make_gw_floatingip_dict(self, floatingip_obj):
         d = self._make_floatingip_dict(floatingip_obj)
         return d
 
-    def _make_ipv6_port_floatingip_dict(self, floatingip_obj):
+    def _make_ecs_ipv6_floatingip_dict(self, floatingip_obj):
+        d = self._make_floatingip_dict(floatingip_obj)
+        return d
+
+    def _make_pf_floatingip_dict(self, floatingip_obj):
         d = self._make_floatingip_dict(floatingip_obj)
         return d
 
@@ -1871,10 +1881,17 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
             for scoped_fip in l3_obj.FloatingIP.get_scoped_floating_ips(
                 context, router_ids)
         ] + [
-            self._make_gw_and_ipv6_port_floatingip_dict(gw_and_ipv6_port_fip)
-            for gw_and_ipv6_port_fip in
-            l3_obj.FloatingIP.get_gw_and_ipv6_port_floating_ip(context,
-                                                               router_ids)
+            self._make_pf_floatingip_dict(pf_fip)
+            for pf_fip in l3_obj.FloatingIP.get_pf_floating_ips(
+                context, router_ids)
+        ] + [
+            self._make_gw_floatingip_dict(gw_fip)
+            for gw_fip in l3_obj.FloatingIP.get_gw_floating_ips(
+                context, router_ids)
+        ] + [
+            self._make_ecs_ipv6_floatingip_dict(ecs_ipv6_fip)
+            for ecs_ipv6_fip in l3_obj.FloatingIP.get_ecs_ipv6_floating_ips(
+                context, router_ids)
         ]
 
     def _get_sync_interfaces(self, context, router_ids, device_owners=None):
